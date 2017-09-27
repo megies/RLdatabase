@@ -1431,7 +1431,8 @@ def store_info_xml(tag_name):
     cat = read_events(pathname_or_url=filename_xml, format='QUAKEML')
 
     cat[0].extra = AttribDict()
-    cat[0].extra.params = params
+    for name, item in params.value.items():
+        cat[0].extra[name] = item
     cat.write(filename_xml, "QUAKEML",
         nsmap={"rotational_seismology_database": r"http://www.rotational-seismology.org"})
 
