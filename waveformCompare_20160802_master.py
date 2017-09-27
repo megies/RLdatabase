@@ -176,7 +176,7 @@ def download_data(origin_time, net, sta, loc, chan, source):
 
     except:
         print "trying to fetch data from file..."        
-        dataDir_get = '/import/netapp-m-02-bay200/mseed_online/archive/'
+        dataDir_get = '/bay200/mseed_online/archive/'
         fileName = ".".join((net, sta, "." + chan + ".D",
                              origin_time.strftime("%Y.%j")))
         filePath = os.path.join(dataDir_get, origin_time.strftime("%Y"),
