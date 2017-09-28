@@ -55,16 +55,35 @@ in the subplot 3 on page 3.
 + saves peak displacement and rotation rate in 18-22s band!
 
 + creates a new xml file containing most of the parameters of the json-file
-"""
 
-import matplotlib as mpl
-mpl.use('Agg')
-import matplotlib
-import matplotlib.pylab as plt
-import argparse
-import datetime
++ 28.09.17 - To-change log: 
+    -Get_corrcoeffs: clean up the cross correlation for loops
+    -backas_analysis: using wrong sampling rates?
+    -ps_arrival_times: list comprehension will clean that up
+    -phas_vel: has the same call twice (ind and not ind)
+                numpy mean of empty slice throwing runtime warning
+    -clean up the store json file, filtering shouldnt be happening in there
+    -fix formatting in main
+"""
+import os
 import json
 import obspy
+import shutil
+import urllib2
+import argparse
+import datetime
+import numpy as np
+import matplotlib as mpl
+mpl.use('Agg')
+import matplotlib.pylab as plt
+from obspy.taup import TauPyModel
+from obspy.core import read
+from obspy.core.stream import Stream
+# from obspy.imaging.beachball import Beach
+from obspy.core.utcdatetime import UTCDateTime
+from mpl_toolkits.basemap import Basemap
+from xml.dom.minidom import parseString
+from collections import OrderedDict
 from obspy import read_events, Catalog
 from obspy.clients.arclink.client import Client as arclinkClient
 from obspy.clients.fdsn import Client as fdsnClient
@@ -72,20 +91,6 @@ from obspy.signal.rotate import rotate_ne_rt
 from obspy.signal.cross_correlation import xcorr
 from obspy.core.util.attribdict import AttribDict
 from obspy.geodetics.base import gps2dist_azimuth, locations2degrees
-from obspy.taup import TauPyModel
-from obspy.core import read
-from obspy.core.stream import Stream
-# from obspy.core.event import readEvents
-# from obspy.imaging.beachball import Beach
-from obspy.core.utcdatetime import UTCDateTime
-from mpl_toolkits.basemap import Basemap
-import os
-import numpy as np
-import shutil
-
-import urllib2
-from xml.dom.minidom import parseString
-from collections import OrderedDict
 
 
 # if matplotlib.__version__ < '1.0':  # Matplotlib 1.0 or newer is necessary
@@ -164,19 +169,20 @@ def download_data(origin_time, net, sta, loc, chan, source):
     """
     # try:
     #     c = arclinkClient(user='test@obspy.org')
-    #     st = c.get_waveforms(network=net, station=sta, location='', channel=chan,
+    #     st = c.get_waveforms(network=net, station=sta, location='', 
+    #                          channel=chan,
     #                          starttime=origin_time-190,
     #                          endtime=origin_time+3*3600+10)
     try:
         print "trying to use fdsn client service..."
         c = fdsnClient(source)
-        st = c.get_waveforms(network=net, station=sta, location='', channel=chan,
-                             starttime=origin_time-190,
-                             endtime=origin_time+3*3600+10)
+        st = c.get_waveforms(network=net, station=sta, location='', 
+                            channel=chan, starttime=origin_time-190,
+                            endtime=origin_time+3*3600+10)
 
     except:
         print "trying to fetch data from file..."        
-        dataDir_get = '/bay200/mseed_online/archive/'
+       dataDir_get = '/bay200/mseed_online/archive/'
         fileName = ".".join((net, sta, "." + chan + ".D",
                              origin_time.strftime("%Y.%j")))
         filePath = os.path.join(dataDir_get, origin_time.strftime("%Y"),
@@ -193,7 +199,8 @@ def download_data(origin_time, net, sta, loc, chan, source):
                 st.extend(read(filePath, starttime = origin_time - 180,
                       endtime = origin_time + 3 * 3600))
                 st.extend(read(filePath2, 
-                      starttime = UTCDateTime(o_time2.year, o_time2.month, o_time2.day, 0, 0),
+                      starttime = UTCDateTime(o_time2.year, 
+                                            o_time2.month, o_time2.day, 0, 0),
                       endtime = origin_time + 3 * 3600))
                 st.merge(method=-1)
             else:
@@ -251,13 +258,12 @@ def event_info_data(event, station, mode):
     latter = origin.latitude
     lonter = origin.longitude
     startev = origin.time
-    #from IPython.core.debugger import Tracer; Tracer(colors="Linux")()
     if station == 'WET' and mode == 'link':
         depth = origin.depth * 0.001  # Depth in km
     else:
         depth = origin.depth * 0.001  # Depth in km
     if station == 'WET':
-        source = 'http://erde.geophysik.uni-muenchen.de' # if erde doesn't work, try 'BGR'
+        source = 'http://erde.geophysik.uni-muenchen.de' # if ! erde , try 'BGR'
         net_r = 'BW'
         net_s = 'GR' #BW'
         sta_r = 'RLAS'
@@ -273,7 +279,8 @@ def event_info_data(event, station, mode):
         chan4 = 'BHZ'
         # ringlaser signal
         rt = download_data(startev, net_r, sta_r, loc_r, chan1, source)
-        #rt[0].data = rt[0].data * (-1) ## apply only for periods of flipped data due to instrument errors
+        #r t[0].data = rt[0].data * (-1) 
+        # apply only for periods of flipped data due to instrument errors
         # broadband station signal
         acE = download_data(startev, net_s, sta_s, loc_s, chan2, source)
         acN = download_data(startev,  net_s, sta_s, loc_s, chan3, source)
@@ -433,7 +440,7 @@ def resample(is_local, baz, rt, ac):
     cutoff_pc = 0.5  # Cut-off frequency for the highpass filter in the P-coda
     if is_local == 'local':
         for trr in (rt + ac):
-            trr.data = trr.data[0: 1800 * rt[0].stats.sampling_rate]
+            trr.data = trr.data[0: int(1800 * rt[0].stats.sampling_rate)]
         rt_pcoda = rt.copy()
         ac_pcoda = ac.copy()
         rt.decimate(factor=2)
@@ -451,7 +458,7 @@ def resample(is_local, baz, rt, ac):
         cutoff = 1.0  # Cut-off freq for the lowpass filter for non-loc events
     else:
         for trr in (rt + ac):
-            trr.data = trr.data[0: 1800 * rt[0].stats.sampling_rate]
+            trr.data = trr.data[0: int(1800 * rt[0].stats.sampling_rate)]
         rt_pcoda = rt.copy()
         ac_pcoda = ac.copy()
         rt.decimate(factor=2)
@@ -509,31 +516,42 @@ def remove_instr_resp(rt, ac, rt_pcoda, ac_pcoda, station, startev):
         # acceleration in nm/s^2
         # note: single zero to go from velocity to acceleration
 
-        displacement = ac.copy() # copy 'raw' velocity measurements to use as displacement later
+        displacement = ac.copy() # copy 'raw' velocity  to use as displacement 
 
         paz_sts2 = {'poles': [(-0.0367429 + 0.036754j),
                               (-0.0367429 - 0.036754j)],
-                    'sensitivity': 0.944019640, 'zeros': [0j], 'gain': 1.0}
+                    'sensitivity': 0.944019640, 
+                    'zeros': [0j], 
+                    'gain': 1.0}
         paz_sts2_displacement = {'poles': [(-0.0367429 + 0.036754j),
-                              (-0.0367429 - 0.036754j)],
-                    'sensitivity': 0.944019640, 'zeros': [0j,0j,0j], 'gain': 1.0}
-        paz_lennartz = {'poles': [(-0.22 + 0.235j),
-                              (-0.22 - 0.235j), (-0.23 + 0.0j)],
-                    'sensitivity': 1, 'zeros': [(0+0j),(0+0j)], 'gain': 1.0}
+                                            (-0.0367429 - 0.036754j)],
+                                'sensitivity': 0.944019640, 
+                                'zeros': [0j,0j,0j], 
+                                'gain': 1.0}
+        paz_lennartz = {'poles': [(-0.22 + 0.235j),(-0.22 - 0.235j), 
+                                                            (-0.23 + 0.0j)],
+                        'sensitivity': 1, 
+                        'zeros': [(0+0j),(0+0j)], 
+                        'gain': 1.0}
         paz_lennartz_displacement = {'poles': [(-0.22 + 0.235j),
-                              (-0.22 - 0.235j), (-0.23 + 0.0j)],
-                    'sensitivity': 1, 'zeros': [(0+0j),(0+0j),(0+0j),(0+0j)], 'gain': 1.0}
+                                            (-0.22 - 0.235j), (-0.23 + 0.0j)],
+                                    'sensitivity': 1, 
+                                    'zeros': [(0+0j),(0+0j),(0+0j),(0+0j)], 
+                                    'gain': 1.0}
         if sta_s == 'WETR':
-            ac.simulate(paz_remove=paz_lennartz, remove_sensitivity=True)  # nm/s^2
+            ac.simulate(paz_remove=paz_lennartz, remove_sensitivity=True) # nm/s^2
             ac_pcoda.simulate(paz_remove=paz_lennartz, remove_sensitivity=True)
-            displacement.simulate(paz_remove=paz_lennartz_displacement, remove_sensitivity=True)
+            displacement.simulate(paz_remove=paz_lennartz_displacement, 
+                                                        remove_sensitivity=True)
             ac.filter('highpass', freq=0.04, zerophase=True, corners=3)
             ac_pcoda.filter('highpass', freq=0.04, zerophase=True, corners=3)
-            displacement.filter('highpass', freq=0.04, zerophase=True, corners=3)
+            displacement.filter('highpass', freq=0.04, zerophase=True, 
+                                                                    corners=3)
         else:
             ac.simulate(paz_remove=paz_sts2, remove_sensitivity=True)  # nm/s^2
             ac_pcoda.simulate(paz_remove=paz_sts2, remove_sensitivity=True)
-            displacement.simulate(paz_remove=paz_sts2_displacement, remove_sensitivity=True)
+            displacement.simulate(paz_remove=paz_sts2_displacement, 
+                                                        remove_sensitivity=True)
 
     else:
         rt[0].data = rt[0].data * 1. / 2.5284 * 1e-3  # Rotation rate in nrad/s
@@ -548,7 +566,8 @@ def remove_instr_resp(rt, ac, rt_pcoda, ac_pcoda, station, startev):
         rt.taper(max_percentage=0.05)
 
         ac.remove_response(output='ACC', pre_filt=(0.005, 0.006, 30., 35.))
-        displacement.remove_response(output='DISP', pre_filt=(0.005, 0.006, 30., 35.))
+        displacement.remove_response(output='DISP', 
+                                            pre_filt=(0.005, 0.006, 30., 35.))
         ac_pcoda.remove_response(output='VEL',
                                  pre_filt=(0.005, 0.006, 30., 35.))
 
@@ -578,9 +597,11 @@ def gaussianfilter(sigarray, delta, bandwidth, freq0):
     #1 : prepare the frequency domain filter
     n = len(sigarray)  #number of samples
     freq = fftfreq(n, delta) #exact (!) frequency array
-    # we construct our gaussian according the constQ criterion of Archambeau et al.
+    # construct our gaussian according the constQ criterion of Archambeau et al.
+    # do not forget negative frequencies
     beta = np.log(2.)/2.
-    g = np.sqrt(beta/np.pi)*np.exp(-beta * (np.abs(freq - freq0) / bandwidth) ** 2.) #do not forget negative frequencies
+    g = np.sqrt(beta/np.pi)*np.exp(-beta * 
+                                    (np.abs(freq - freq0) / bandwidth) ** 2.) 
 
 
     #2 : convolve your signal by the filter in frequency domain 
@@ -589,9 +610,12 @@ def gaussianfilter(sigarray, delta, bandwidth, freq0):
 
     #3 : back to time domain
     sigarray_filtered = np.real(ifft(sigarray_fourier_filtered))
-    sigarray_filtered = highpass(sigarray_filtered, freq=0.0033, df=5, corners=3, zerophase=True)
+    sigarray_filtered = highpass(sigarray_filtered, freq=0.0033, 
+                                                df=5, corners=3, zerophase=True)
     sigarray_filtered = detrend(sigarray_filtered)
+
     return sigarray_filtered
+
 
 def filter_and_rotate(ac, rt, baz, rt_pcoda, ac_pcoda, cutoff, cutoff_pc,
                       station, is_local):
@@ -670,8 +694,10 @@ def filter_and_rotate(ac, rt, baz, rt_pcoda, ac_pcoda, cutoff, cutoff_pc,
 
     # filter out secondary microseism only for non-local events
     if is_local == "non-local":    
-        ac.filter('bandstop', freqmin=0.083, freqmax=0.2, corners=4, zerophase=True)
-        rt.filter('bandstop', freqmin=0.083, freqmax=0.2, corners=4, zerophase=True)
+        ac.filter('bandstop', freqmin=0.083, freqmax=0.2, corners=4, 
+                                                                zerophase=True)
+        rt.filter('bandstop', freqmin=0.083, freqmax=0.2, corners=4, 
+                                                                zerophase=True)
         ac.taper(max_percentage=0.05)
         rt.taper(max_percentage=0.05)
 
@@ -776,29 +802,36 @@ def ps_arrival_times(distance, depth, init_sec):
     tiems = []
     # from all possible P arrivals select the earliest one
     for i2 in xrange(0, len(tt)):
-        if tt.__getitem__(i2).__dict__['name'] == 'P' or tt.__getitem__(i2).__dict__[
-                'name'] == 'p' or tt.__getitem__(i2).__dict__['name'] ==\
-                'Pdiff' or tt.__getitem__(i2).__dict__['name'] == 'PKiKP' or\
-                tt.__getitem__(i2).__dict__['name'] == 'PKIKP' or tt.__getitem__(i2).__dict__[
-                'name'] == 'PP' or tt.__getitem__(i2).__dict__['name'] ==\
-                'Pb' or tt.__getitem__(i2).__dict__['name'] == 'Pn' or\
-                tt.__getitem__(i2).__dict__['name'] == 'Pg':
+        if tt.__getitem__(i2).__dict__['name'] == 'P' or\
+            tt.__getitem__(i2).__dict__['name'] == 'p' or\
+            tt.__getitem__(i2).__dict__['name'] =='Pdiff' or\
+            tt.__getitem__(i2).__dict__['name'] == 'PKiKP' or\
+            tt.__getitem__(i2).__dict__['name'] == 'PKIKP' or\
+            tt.__getitem__(i2).__dict__['name'] == 'PP' or\
+            tt.__getitem__(i2).__dict__['name'] == 'Pb' or\
+            tt.__getitem__(i2).__dict__['name'] == 'Pn' or\
+            tt.__getitem__(i2).__dict__['name'] == 'Pg':
                     tiem_p = tt.__getitem__(i2).__dict__['time']
                     tiemp.append(tiem_p)
+
     arriv_p = np.floor(init_sec + min(tiemp))
 
     # from all possible S arrivals select the earliest one
     for i3 in xrange(0, len(tt)):
-        if tt.__getitem__(i3).__dict__['name'] == 'S' or tt.__getitem__(i3).__dict__[
-                'name'] == 's' or tt.__getitem__(i3).__dict__['name'] ==\
-                'Sdiff' or tt.__getitem__(i3).__dict__['name'] == 'SKiKS' or\
-                tt.__getitem__(i3).__dict__['name'] == 'SKIKS' or tt.__getitem__(i3).__dict__[
-                'name'] == 'SS' or tt.__getitem__(i3).__dict__['name'] ==\
-                'Sb' or tt.__getitem__(i3).__dict__['name'] == 'Sn' or\
-                tt.__getitem__(i3).__dict__['name'] == 'Sg':
+        if tt.__getitem__(i3).__dict__['name'] == 'S' or\
+            tt.__getitem__(i3).__dict__['name'] == 's' or\
+            tt.__getitem__(i3).__dict__['name'] == 'Sdiff' or\
+            tt.__getitem__(i3).__dict__['name'] == 'SKiKS' or\
+            tt.__getitem__(i3).__dict__['name'] == 'SKIKS' or\
+            tt.__getitem__(i3).__dict__['name'] == 'SS' or\
+            tt.__getitem__(i3).__dict__['name'] == 'Sb' or\
+            tt.__getitem__(i3).__dict__['name'] == 'Sn' or\
+            tt.__getitem__(i3).__dict__['name'] == 'Sg':
                     tiem_s = tt.__getitem__(i3).__dict__['time']
                     tiems.append(tiem_s)
+
     arriv_s = np.floor(init_sec + min(tiems))
+
     return arriv_p, arriv_s
 
 
@@ -862,7 +895,8 @@ def time_windows(baz, arriv_p, arriv_s, init_sec, is_local):
         max_lwi = min_lwi + 12
         min_lwf = max_lwi
         max_lwf = min_lwf + 80
-    print(min_pw, min_lwi)
+
+
     return min_pw, max_pw, min_sw, max_sw, min_lwi, max_lwi, min_lwf, max_lwf
 
 
@@ -909,6 +943,7 @@ def surf_tts(distance, start_time):
     peq = surftts[np.asarray(difer).argmin()] - \
         tts[np.asarray(diferans).argmin()]
     arrival = arriv_lov + peq
+
     return arrival
 
 
@@ -935,19 +970,22 @@ def Get_corrcoefs(rotra, rodat, acstr, rotate_array, sec, station):
     :rtype thres: numpy.ndarray
     :return thres: Array for plotting dashed line of 75'%' correlation.
     """
-
     compE, compN = station_components(station)
+
+    rotra_SR = int(rotra.stats.sampling_rate)
+    compN_SR = int(acstr.select(component=compN)[0].stats.sampling_rate)
+
     corrcoefs = []
-    for i5 in xrange(0, len(rodat) // (int(rotra.stats.sampling_rate) * sec)):
-        coeffs = xcorr(rodat[rotra.stats.sampling_rate * sec *
-                             i5:rotra.stats.sampling_rate * sec * (i5 + 1)],
-                       rotate_array[acstr.select(component=compN)[0].stats.
-                                    sampling_rate * sec * i5:acstr.
-                                    select(component=compN)[0].stats.
-                                    sampling_rate * sec * (i5 + 1)], 0)
+    for i5 in xrange(0, len(rodat) // (rotra_SR * sec)):
+        coeffs = xcorr(rodat[rotra_SR * sec * i5:rotra_SR * sec * (i5 + 1)],
+                       rotate_array[compN_SR * sec * i5:
+                                            compN_SR * sec * (i5 + 1)], 0)
+
         corrcoefs.append(coeffs[1])
+
     corrcoefs = np.asarray(corrcoefs)
     thres = 0.75 * np.ones(len(corrcoefs) + 1)
+
     return corrcoefs, thres
 
 
@@ -980,21 +1018,19 @@ def backas_analysis(rotra, rodat, acstr, sec, corrcoefs, ind, station):
     :return backas: Vector containing backazimuths (step: 10°).
     """
     compE, compN = station_components(station)
+    rotra_SR = int(rotra.stats.sampling_rate)
+
     step = 10
     backas = np.linspace(0, 360 - step, 360 / step)
     corrbaz = []
     for i6 in xrange(0, len(backas)):
         for i7 in xrange(0, len(corrcoefs)):
-            corrbazz = xcorr(rodat[rotra.stats.sampling_rate * sec *
-                                   i7:rotra.stats.sampling_rate * sec *
-                                   (i7 + 1)],
+            corrbazz = xcorr(rodat[rotra_SR* sec * i7:rotra_SR * sec *(i7 + 1)],
                              rotate_ne_rt(acstr.select(component=compN)[0].
-                                          data[0:ind], acstr.
-                                          select(component=compE)[0].
-                                          data[0:ind], backas[i6])
-                             [1][rotra.stats.sampling_rate * sec * i7:rotra.
-                                 stats.sampling_rate * sec * (i7 + 1)],
-                             0)
+                                          data[0:ind], 
+                                          acstr.select(component=compE)[0].
+                                          data[0:ind], backas[i6])[1]
+                            [rotra_SR * sec * i7:rotra_SR * sec * (i7 + 1)],0)
             corrbaz.append(corrbazz[1])
     corrbaz = np.asarray(corrbaz)
     corrbaz = corrbaz.reshape(len(backas), len(corrcoefs))
@@ -1034,31 +1070,22 @@ def backas_est(rt, ac, min_sw, max_lwf, station):
     :return backas2: Vector containing backazimuths (step: 1°).
     """
     compE, compN = station_components(station)
-    rt2 = rt[0].data[min_sw * rt[0].stats.sampling_rate:
-                     max_lwf * rt[0].stats.sampling_rate]
-    acn2 = ac.select(component=compN)[0].data[min_sw *
-                                              rt[0].stats.sampling_rate:max_lwf
-                                              * rt[0].stats.
-                                              sampling_rate]
-    ace2 = ac.select(component=compE)[0].data[min_sw *
-                                              rt[0].stats.sampling_rate:max_lwf
-                                              * rt[0].stats.sampling_rate]
+    rt_SR = int(rt[0].stats.sampling_rate)
+
+    rt2 = rt[0].data[min_sw * rt_SR:max_lwf * rt_SR]
+    acn2 = ac.select(component=compN)[0].data[min_sw * rt_SR:max_lwf * rt_SR]
+    ace2 = ac.select(component=compE)[0].data[min_sw * rt_SR:max_lwf * rt_SR]
     sec2 = 30
     step2 = 1
     backas2 = np.linspace(0, 360 - step2, 360 / step2) # BAz array
     corrbaz2 = []
 
     for j3 in xrange(len(backas2)):
-        for j4 in xrange(len(rt2) // (int(rt[0].stats.sampling_rate) * sec2)):
-            corrbazz2 = xcorr(rt2[int(rt[0].stats.sampling_rate) * sec2 *
-                                  j4:int(rt[0].stats.sampling_rate) * sec2 *
-                                  (j4 + 1)],
+        for j4 in xrange(len(rt2) // (rt_SR * sec2)):
+            corrbazz2 = xcorr(rt2[rt_SR * sec2 * j4:rt_SR * sec2 * (j4 + 1)],
                               rotate_ne_rt(acn2, ace2, backas2[j3])[1]
-                              [int(rt[0].stats.sampling_rate) * sec2 * j4:
-                               int(rt[0].stats.sampling_rate) * sec2 *
-                               (j4 + 1)],
-                              0)
-            corrbaz2.append(corrbazz2[1]) # correlation coefficients for BAz-array
+                              [rt_SR * sec2 * j4: rt_SR * sec2 * (j4 + 1)], 0)
+            corrbaz2.append(corrbazz2[1]) # corr. coefficients for BAz-array
 
     corrbaz2 = np.asarray(corrbaz2)
     corrbaz2 = corrbaz2.reshape(len(backas2), len(corrbaz2) / len(backas2))
@@ -1076,8 +1103,8 @@ def backas_est(rt, ac, min_sw, max_lwf, station):
         bazsum = sum(bazsum)
         corrsum.append(bazsum)
 
-    best_ebaz = backas2[np.asarray(corrsum).argmax()] ## = EBA!
-    max_ebaz_xcoef = np.max(corrbaz2[best_ebaz]) ## maximum correlation coefficient for EBA
+    best_ebaz = backas2[np.asarray(corrsum).argmax()] # = EBA!
+    max_ebaz_xcoef = np.max(corrbaz2[best_ebaz]) # maximum corr. coeff. for EBA
 
     return corrsum, backas2, max_ebaz_xcoef, best_ebaz
 
@@ -1108,16 +1135,16 @@ def phase_vel(rt, sec, corrcoefs, rotate, corrsum, backas2, ind_band,
     :return EBA: Estimated backazimuth.
     """
 
+    rt_SR = int(rt[0].stats.sampling_rate)
+
     phasv = []
     if not ind_band:  # not dealing with frequency bands
         for i8 in xrange(0, len(corrcoefs)):
             if corrcoefs[i8] >= 0.75:
                 # Velocity in km/s
-                phas_v = .001 * 0.5 * max(rotate[1][rt[0].stats.sampling_rate *
-                                          sec * i8:rt[0].stats.sampling_rate *
-                                          sec * (i8 + 1)]) /\
-                    max(rt[0].data[rt[0].stats.sampling_rate * sec *
-                        i8:rt[0].stats.sampling_rate * sec * (i8 + 1)])
+                phas_v = .001 * 0.5 * max(rotate[1][rt_SR * sec * i8:rt_SR * sec
+                                         * (i8 + 1)]) / max(rt[0].data[
+                                    rt_SR * sec * i8:rt_SR * sec * (i8 + 1)])
             else:
                 phas_v = np.NaN
             phasv.append(phas_v)
@@ -1127,11 +1154,9 @@ def phase_vel(rt, sec, corrcoefs, rotate, corrsum, backas2, ind_band,
         for i8 in xrange(ind_surf, len(corrcoefs)):
             if corrcoefs[i8] >= 0.75:
                 # Velocity in km/s
-                phas_v = .001 * 0.5 * max(rotate[1][rt[0].stats.sampling_rate *
-                                          sec * i8:rt[0].stats.sampling_rate *
-                                          sec * (i8 + 1)]) /\
-                    max(rt[0].data[rt[0].stats.sampling_rate * sec *
-                        i8:rt[0].stats.sampling_rate * sec * (i8 + 1)])
+                phas_v = .001 * 0.5 * max(rotate[1][rt_SR * sec * i8:rt_SR *sec 
+                                        * (i8 + 1)]) / max(rt[0].data[
+                                    rt_SR * sec * i8:rt_SR * sec * (i8 + 1)])
             else:
                 phas_v = np.NaN
             phasv.append(phas_v)
@@ -1164,6 +1189,7 @@ def sn_ratio(full_signal, p_arrival, sam_rate):
     :rtype SNR: float
     :return SNR: Signal-to-noise ratio of the seismogram.
     """
+    sam_rate = int(sam_rate)
 
     tr_sign = max(full_signal)
     tr_noise = abs(np.mean(full_signal[sam_rate * (p_arrival - 180): sam_rate
@@ -1223,16 +1249,18 @@ def store_info_json(rotate, ac, rt, corrcoefs, baz, arriv_p, EBA, tag_name,
     # measured from point of max rotation rate to the next minimum (1/2 period)
     # that's why there is a factor 2
     dis_18_22s =  displ.copy()
-    dis_18_22s.filter('bandpass', freqmin=0.0454545, freqmax=0.055556, corners=4, zerophase=True)
+    dis_18_22s.filter('bandpass', freqmin=0.0454545, freqmax=0.055556, 
+                                                    corners=4, zerophase=True)
     dis_18_22s.taper(max_percentage=0.05)
-    dis_18_22s_rot = rotate_ne_rt(dis_18_22s.select(component=compN)[
-                          0].data, dis_18_22s.select(component=compE)[0].data, baz[2])
+    dis_18_22s_rot = rotate_ne_rt(
+                            dis_18_22s.select(component=compN)[0].data, 
+                            dis_18_22s.select(component=compE)[0].data, baz[2])
 
     displ_rot = rotate_ne_rt(displ.select(component=compN)[
                           0].data, displ.select(component=compE)[0].data, baz[2])
-    #obspy.signal.filter.bandpass(displ[1], freqmin=0.0454545, freqmax=0.055556, corners=4, zerophase=True, df=rt[0].stats.sampling_rate)
     rt_18_22s  = rt.copy()
-    rt_18_22s.filter('bandpass', freqmin=0.0454545, freqmax=0.055556, corners=4, zerophase=True)
+    rt_18_22s.filter('bandpass', freqmin=0.0454545, freqmax=0.055556, 
+                                                    corners=4, zerophase=True)
     rt_18_22s.taper(max_percentage=0.05)
     PDIS_18_22 = max(dis_18_22s_rot[1])
     PRZ_18_22  = max(rt_18_22s[0])
@@ -1365,20 +1393,27 @@ def store_info_json(rotate, ac, rt, corrcoefs, baz, arriv_p, EBA, tag_name,
 
     outfile.close()
 
-def parse_json(filename,parameter1,parameter2,parameter3,parameter4,parameter5,parameter6,parameter7,parameter8,parameter9):
+def parse_json(filename,parameter1,parameter2,parameter3,parameter4,parameter5,
+                                parameter6,parameter7,parameter8,parameter9):
     with open(filename) as data_file:
         data = json.load(data_file)
-    return data[parameter1], data[parameter2], data[parameter3], data[parameter4],\
-    data[parameter5], data[parameter6],data[parameter7],data[parameter8],data[parameter9]
+
+    return data[parameter1], data[parameter2], data[parameter3],\
+            data[parameter4],data[parameter5], data[parameter6],\
+            data[parameter7],data[parameter8],data[parameter9]
+
 
 def store_info_xml(tag_name):
     filename_json = tag_name + '/' + tag_name[23:] + '.json'
     filename_xml = tag_name + '/' + tag_name[23:] + '.xml'
 
-    d,pcc,tSNR,rSNR,tba,eba,peak_tra,freq, p_rot = parse_json(filename_json,'epicentral_distance',
-        'peak_correlation_coefficient','transverse_acceleration_SNR','vertical_rotation_rate_SNR',
-        'theoretical_backazimuth','estimated_backazimuth','peak_transverse_acceleration', 
-        'frequency_at_peak_vertical_rotation_rate', 'peak_vertical_rotation_rate')
+    d,pcc,tSNR,rSNR,tba,eba,peak_tra,freq,p_rot = parse_json(
+        filename_json,'epicentral_distance','peak_correlation_coefficient',
+        'transverse_acceleration_SNR','vertical_rotation_rate_SNR',
+        'theoretical_backazimuth','estimated_backazimuth',
+        'peak_transverse_acceleration', 
+        'frequency_at_peak_vertical_rotation_rate', 
+        'peak_vertical_rotation_rate')
 
     ns = 'http://www.rotational-seismology.org'
 
@@ -1434,7 +1469,8 @@ def store_info_xml(tag_name):
     for name, item in params.value.items():
         cat[0].extra[name] = item
     cat.write(filename_xml, "QUAKEML",
-        nsmap={"rotational_seismology_database": r"http://www.rotational-seismology.org"})
+        nsmap={"rotational_seismology_database": 
+                            r"http://www.rotational-seismology.org"})
 
 
 def plotWaveformComp(event, station, link, mode, filter_e, event_source):
@@ -1458,12 +1494,15 @@ def plotWaveformComp(event, station, link, mode, filter_e, event_source):
         or an IRIS link ('link').
     """
 
-    tag_name = os.path.join('database/static/OUTPUT', catalog + '_' + str(event.origins[0]['time'].date) +
-     'T' + str(event.origins[0]['time'].hour) + ':' + str(event.origins[0]['time'].minute) +
-     '_' + str(event.magnitudes[0]['mag']) + '_' + 
-     str(event.event_descriptions[0]['text'].splitlines()[0].replace(' ', '_').replace(',', '_')))
-    tag_name2 = os.path.join('database/static/OUTPUT/Phase_velocities', str(event)
-                             .splitlines()[0].replace('\t', '')
+    tag_name = os.path.join('database/static/OUTPUT', catalog + '_' + 
+                            str(event.origins[0]['time'].date) + 'T' + 
+                            str(event.origins[0]['time'].hour) + ':' + 
+                            str(event.origins[0]['time'].minute) + '_' + 
+                            str(event.magnitudes[0]['mag']) + '_' + 
+                            str(event.event_descriptions[0]['text'].splitlines(
+                                    )[0].replace(' ', '_').replace(',', '_')))
+    tag_name2 = os.path.join('database/static/OUTPUT/Phase_velocities', 
+                            str(event).splitlines()[0].replace('\t', '')
                              .replace(' ', '_').replace('|', '_')
                              .replace(':', '_'))
     # event information:
@@ -1763,8 +1802,8 @@ def plotWaveformComp(event, station, link, mode, filter_e, event_source):
         resample(is_local(baz), baz, rt, ac)
 
     print 'Removing instrument response...'
-    rt, ac, rt_pcoda, ac_pcoda, displacement = remove_instr_resp(rt, ac, rt_pcoda, ac_pcoda,
-                                                   station, startev)
+    rt, ac, rt_pcoda, ac_pcoda, displacement = remove_instr_resp(
+                                    rt, ac, rt_pcoda, ac_pcoda,station, startev)
 
     print 'Filtering and rotating...'
     rotate, pcod_rotate, pcoda_rotate, frtp, facp, frotate, cop_rt, rt_band1,\
@@ -1854,27 +1893,28 @@ def plotWaveformComp(event, station, link, mode, filter_e, event_source):
     plt.legend(loc=7,shadow=True)
     # P coda
     plt.subplot2grid((6, 5), (0, 0), colspan=2)
-    cp = 0.5 * max(abs(pcod_rotate[1][cop_rt[0].stats.sampling_rate * min_pw:
-                                      cop_rt[0].stats.sampling_rate * max_pw])
-                   ) / max(abs(cop_rt[0].data[cop_rt[0].stats.sampling_rate *
-                                              min_pw:cop_rt[0].stats.
-                                              sampling_rate * max_pw]))
-    minamp1_pcod = min((0.5 / cp) * pcod_rotate[1][rt[0].stats.sampling_rate
-                                                   * min_pw:rt[0].stats.
-                                                   sampling_rate * max_pw])
-    minamp2_pcod = min(cop_rt[0].data[rt[0].stats.sampling_rate * min_pw:rt[0]
-                                      .stats.sampling_rate * max_pw])
-    maxamp1_pcod = max((0.5 / cp) * pcod_rotate[1][rt[0].stats.sampling_rate
-                                                   * min_pw:rt[0].stats.
-                                                   sampling_rate * max_pw])
-    maxamp2_pcod = max(cop_rt[0].data[rt[0].stats.sampling_rate * min_pw:rt[0]
-                                      .stats.sampling_rate * max_pw])
+
+    # set sampling rate as integer values to avoid deprecation
+    cop_rt_SR = int(cop_rt[0].stats.sampling_rate)
+    rt_SR = int(rt[0].stats.sampling_rate)
+
+    cp = 0.5 * (max(abs(pcod_rotate[1][cop_rt_SR * min_pw:cop_rt_SR * max_pw]))/
+             max(abs(cop_rt[0].data[cop_rt_SR * min_pw:cop_rt_SR * max_pw])))
+    minamp1_pcod = min((0.5 / cp) * 
+                            pcod_rotate[1][rt_SR * min_pw:rt_SR * max_pw])
+    minamp2_pcod = min(cop_rt[0].data[rt_SR * min_pw:rt_SR * max_pw])
+
+    maxamp1_pcod = max((0.5 / cp) * 
+                            pcod_rotate[1][rt_SR * min_pw:rt_SR * max_pw])
+    maxamp2_pcod = max(cop_rt[0].data[rt_SR * min_pw:rt_SR * max_pw])
+
+# FROM HERE OKAY DELETE MARKER
+
     plt.plot(time, cop_rt[0].data, color='r')
     plt.plot(time, (0.5 / cp) * pcod_rotate[1], color='k')
     plt.xlim(min_pw, max_pw)
-    plt.ylim(
-        min([minamp1_pcod, minamp2_pcod]),
-        max([maxamp1_pcod, maxamp2_pcod]))
+    plt.ylim(min([minamp1_pcod, minamp2_pcod]),
+            max([maxamp1_pcod, maxamp2_pcod]))
     plt.xlabel(ur'Time [s]', fontweight='bold', fontsize=11)
     plt.ylabel(
         ur'$\dot{\mathbf{\Omega}}_\mathbf{z}$ [nrad/s] - a$_\mathbf{T}$/2c'
@@ -1885,20 +1925,13 @@ def plotWaveformComp(event, station, link, mode, filter_e, event_source):
     # S wave
     plt.subplot2grid((6, 5), (0, 3), colspan=2)
     # colorscale??
-    cs = 0.5 * max(abs(rotate[1][rt[0].stats.sampling_rate * min_sw:rt[0].
-                                 stats.sampling_rate * max_sw])) /\
-        max(abs(rt[0].data[rt[0].stats.sampling_rate * min_sw:rt[0].stats.
-                           sampling_rate * max_sw]))
-    minamp1_s = min((0.5 / cs) * rotate[1][rt[0].stats.sampling_rate
-                                           * min_sw:rt[0].stats.sampling_rate
-                                           * max_sw])
-    minamp2_s = min(rt[0].data[rt[0].stats.sampling_rate * min_sw:rt[0].stats.
-                               sampling_rate * max_sw])
-    maxamp1_s = max((0.5 / cs) * rotate[1][rt[0].stats.sampling_rate
-                                           * min_sw:rt[0].stats.sampling_rate
-                                           * max_sw])
-    maxamp2_s = max(rt[0].data[rt[0].stats.sampling_rate * min_sw:rt[0].stats.
-                               sampling_rate * max_sw])
+    cs = 0.5 * (max(abs(rotate[1][rt_SR * min_sw:rt_SR * max_sw])) / 
+                max(abs(rt[0].data[rt_SR * min_sw:rt_SR * max_sw])))
+    minamp1_s = min((0.5 / cs) * rotate[1][rt_SR * min_sw:rt_SR * max_sw])
+    minamp2_s = min(rt[0].data[rt_SR * min_sw:rt_SR * max_sw])
+    maxamp1_s = max((0.5 / cs) * rotate[1][rt_SR* min_sw:rt_SR* max_sw])
+    maxamp2_s = max(rt[0].data[rt_SR * min_sw:rt_SR * max_sw])
+
     plt.plot(time, rt[0].data, color='r')
     plt.plot(time, (0.5 / cs) * rotate[1], color='k')
     plt.xlim(min_sw, max_sw)
@@ -1914,20 +1947,13 @@ def plotWaveformComp(event, station, link, mode, filter_e, event_source):
 
     # surface waves
     plt.subplot2grid((6, 5), (5, 0), colspan=2)
-    cl1 = 0.5 * max(abs(rotate[1][rt[0].stats.sampling_rate * min_lwi:rt[0].
-                                  stats.sampling_rate * max_lwi])) /\
-        max(abs(rt[0].data[rt[0].stats.sampling_rate * min_lwi:rt[0].
-            stats.sampling_rate * max_lwi]))
-    minamp1_surf = min((0.5 / cl1) * rotate[1][rt[0].stats.sampling_rate *
-                                               min_lwi:rt[0].stats.
-                                               sampling_rate * max_lwi])
-    minamp2_surf = min(rt[0].data[rt[0].stats.sampling_rate * min_lwi:rt[0].
-                                  stats.sampling_rate * max_lwi])
-    maxamp1_surf = max((0.5 / cl1) * rotate[1][rt[0].stats.sampling_rate
-                                               * min_lwi:rt[0].stats.
-                                               sampling_rate * max_lwi])
-    maxamp2_surf = max(rt[0].data[rt[0].stats.sampling_rate *
-                                  min_lwi:rt[0].stats.sampling_rate * max_lwi])
+    cl1 = 0.5 * (max(abs(rotate[1][rt_SR * min_lwi:rt_SR * max_lwi])) /
+                 max(abs(rt[0].data[rt_SR * min_lwi:rt_SR * max_lwi])))
+    minamp1_surf = min((0.5 / cl1) * rotate[1][rt_SR * min_lwi:rt_SR * max_lwi])
+    minamp2_surf = min(rt[0].data[rt_SR * min_lwi:rt_SR * max_lwi])
+    maxamp1_surf = max((0.5 / cl1) * rotate[1][rt_SR* min_lwi:rt_SR * max_lwi])
+    maxamp2_surf = max(rt[0].data[rt_SR * min_lwi:rt_SR * max_lwi])
+
     plt.plot(time, rt[0].data, color='r')
     plt.plot(time, (0.5 / cl1) * rotate[1], color='k')
     plt.xlim(min_lwi, max_lwi)
@@ -1944,20 +1970,13 @@ def plotWaveformComp(event, station, link, mode, filter_e, event_source):
 
     # later surface waves
     plt.subplot2grid((6, 5), (5, 3), colspan=2)
-    cl2 = 0.5 * max(abs(rotate[1][rt[0].stats.sampling_rate * min_lwf:rt[0].
-                                  stats.sampling_rate * max_lwf])) /\
-        max(abs(rt[0].data[rt[0].stats.sampling_rate * min_lwf:rt[0].
-                stats.sampling_rate * max_lwf]))
-    minamp1_lat = min((0.5 / cl2) * rotate[1][rt[0].stats.sampling_rate
-                                              * min_lwf:rt[0].stats.
-                                              sampling_rate * max_lwf])
-    minamp2_lat = min(rt[0].data[rt[0].stats.sampling_rate * min_lwf:rt[0].
-                                 stats.sampling_rate * max_lwf])
-    maxamp1_lat = max((0.5 / cl2) * rotate[1][rt[0].stats.sampling_rate
-                                              * min_lwf:rt[0].stats.
-                                              sampling_rate * max_lwf])
-    maxamp2_lat = max(rt[0].data[rt[0].stats.sampling_rate * min_lwf:rt[0].
-                                 stats.sampling_rate * max_lwf])
+    cl2 = 0.5 * (max(abs(rotate[1][rt_SR * min_lwf:rt_SR * max_lwf])) /
+                 max(abs(rt[0].data[rt_SR * min_lwf:rt_SR * max_lwf])))
+    minamp1_lat = min((0.5 / cl2) * rotate[1][rt_SR* min_lwf:rt_SR * max_lwf])
+    minamp2_lat = min(rt[0].data[rt_SR * min_lwf:rt_SR * max_lwf])
+    maxamp1_lat = max((0.5 / cl2) * rotate[1][rt_SR* min_lwf:rt_SR * max_lwf])
+    maxamp2_lat = max(rt[0].data[rt_SR * min_lwf:rt_SR * max_lwf])
+
     plt.plot(time, rt[0].data, color='r')
     plt.plot(time, (0.5 / cl2) * rotate[1], color='k')
     plt.xlim(min_lwf, max_lwf)
@@ -2128,8 +2147,10 @@ def plotWaveformComp(event, station, link, mode, filter_e, event_source):
     cb1.set_label(ur'X-corr. coeff.', fontweight='bold')
 
     plt.subplot2grid((4, 26), (2, 0), colspan=25)
-    plt.plot(np.arange(0, sec * len(corrcoefs), sec), max_coefs_10deg, 'ro-', label='Max. CC for est. BAz', linewidth=1)
-    plt.plot(np.arange(0, sec * len(corrcoefs), sec), corrcoefs, 'ko-', label='CC for theo. BAz', linewidth=1)
+    plt.plot(np.arange(0, sec * len(corrcoefs), sec), max_coefs_10deg, 'ro-', 
+                                    label='Max. CC for est. BAz', linewidth=1)
+    plt.plot(np.arange(0, sec * len(corrcoefs), sec), corrcoefs, 'ko-', 
+                                        label='CC for theo. BAz', linewidth=1)
     plt.plot(np.arange(0, sec * len(corrcoefs) + 1, sec), thres, '--r', lw=2)
     plt.ylabel(ur'X-corr. coeff.', fontsize=10, fontweight='bold')
     plt.text(time[len(time) - 1] + 50, 0.71, ur'0.75', color='red')
@@ -2177,16 +2198,17 @@ def plotWaveformComp(event, station, link, mode, filter_e, event_source):
         sec_p = 2
 
     corrcoefs_p = []
-    rt_pcodaxc = frtp[0].data[0: (min_lwi + max_lwi) // 2 * rt_pcoda[0].
-                              stats.sampling_rate]
-    pcoda_rotatexc = frotate[1][0: (min_lwi + max_lwi) // 2 * facp[0].
-                                stats.sampling_rate]
+    rt_pcodaxc = frtp[0].data[0: (min_lwi + max_lwi) // 2 * int(
+                                        rt_pcoda[0].stats.sampling_rate)]
+    pcoda_rotatexc = frotate[1][0: (min_lwi + max_lwi) // 2 * int(
+                                        facp[0].stats.sampling_rate)]
 
     corrcoefs_p, thres_p = Get_corrcoefs(rt_pcoda[0], rt_pcodaxc, facp,
                                          pcoda_rotatexc, sec_p, station)
 
     print 'Backazimuth analysis...'
 
+    ac_pc_SR = int(ac_pcoda[0].stats.sampling_rate)
     ind = max_lwi * facp[0].stats.sampling_rate
 
     corrbazp, maxcorrp, backas, max_coefs_10deg_p =\
@@ -2199,12 +2221,9 @@ def plotWaveformComp(event, station, link, mode, filter_e, event_source):
     rt_pcoda.taper(max_percentage=0.05)
 
     time_p = rt_pcoda[0].stats.delta * np.arange(0, len(rt_pcoda[0].data))
-    fact1_p = 2 * max(rt_pcoda[0].data[0: max_lwi * ac_pcoda[0].stats.
-                                       sampling_rate])
-    c1_p = .5 * max(abs(pcoda_rotate[1][0: max_lwi * ac_pcoda[0].stats.
-                                        sampling_rate])) /\
-        max(abs(rt_pcoda[0].data[0: max_lwi * ac_pcoda[0].stats.
-                sampling_rate]))
+    fact1_p = 2 * max(rt_pcoda[0].data[0:max_lwi * ac_pc_SR])
+    c1_p = .5 * (max(abs(pcoda_rotate[1][0:max_lwi * ac_pc_SR])) /
+                max(abs(rt_pcoda[0].data[0: max_lwi * ac_pc_SR])))
 
     maxcorrp_over50 = []
     for i10 in range(0, len(maxcorrp)):
@@ -2221,11 +2240,8 @@ def plotWaveformComp(event, station, link, mode, filter_e, event_source):
     plt.ylabel(ur'a$_\mathbf{Z}$ [nm/s$^2$]', fontweight='bold', fontsize=11)
     plt.ticklabel_format(axis='y', style='sci', scilimits=(-2,2))
     plt.xlim(0, (min_lwi + max_lwi) // 2)
-    plt.ylim(min(ac_pcoda.select(component='Z')[0].
-                 data[0: max_lwi * ac_pcoda[0].stats.sampling_rate]),
-             max(ac_pcoda.select(component='Z')[0].data[0: max_lwi *
-                                                        ac_pcoda[0].stats.
-                                                        sampling_rate]))
+    plt.ylim(min(ac_pcoda.select(component='Z')[0].data[0:max_lwi * ac_pc_SR]),
+             max(ac_pcoda.select(component='Z')[0].data[0:max_lwi * ac_pc_SR]))
     plt.title(ur'$\dot{\mathbf{\Omega}}_\mathbf{z}$ and a$_\mathbf{T}$'
               'correlation in the P-coda in a %d seconds time window'
               ' (highpass, cutoff: 1 Hz). Event: %s %s' % (sec_p, startev.date, startev.time))
@@ -2238,14 +2254,13 @@ def plotWaveformComp(event, station, link, mode, filter_e, event_source):
     plt.ylabel(ur'$\dot{\mathbf{\Omega}}_\mathbf{z}$ [nrad/s] -'
                'a$_\mathbf{T}$/2c [1/s]', fontweight='bold', fontsize=11)
     plt.xlim(0, (min_lwi + max_lwi) // 2)
-    plt.ylim(min(rt_pcoda[0].data[0: max_lwi * ac_pcoda[0].stats.
-             sampling_rate]), fact1_p + max((1. / (2. * c1_p)) *
-             pcoda_rotate[1][0: max_lwi * ac_pcoda[0].stats.sampling_rate]))
+    plt.ylim(min(rt_pcoda[0].data[0: max_lwi * ac_pc_SR]), 
+                    fact1_p + max((1. / (2. * c1_p)) * 
+                    pcoda_rotate[1][0: max_lwi * ac_pc_SR]))
     xlim2 = (min_lwi + max_lwi) // 2
-    box_yposition2 = (fact1_p + max((1. / (2. * c1_p)) * pcoda_rotate[1]
-                      [0: max_lwi * ac_pcoda[0].stats.sampling_rate]) -
-                      np.abs(min(rt_pcoda[0].data[0: max_lwi * ac_pcoda[0].
-                             stats.sampling_rate])))/2.
+    box_yposition2 = (fact1_p + max((1. / (2. * c1_p)) * 
+                        pcoda_rotate[1][0: max_lwi * ac_pc_SR]) -
+                        np.abs(min(rt_pcoda[0].data[0: max_lwi * ac_pc_SR])))/2.
     plt.axvline(x=min_pw, linewidth=1)
     plt.annotate('P-arrival', xy=(min_pw+xgap*float(xlim2/xlim1),
                                   box_yposition2), fontsize=14,
