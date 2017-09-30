@@ -64,6 +64,7 @@ in the subplot 3 on page 3.
                 numpy mean of empty slice throwing runtime warning
     -clean up the store json file, filtering shouldnt be happening in there
     -fix formatting in main
+    -change tag names to remove colons
 """
 import os
 import json
@@ -182,7 +183,7 @@ def download_data(origin_time, net, sta, loc, chan, source):
 
     except:
         print "trying to fetch data from file..."        
-       dataDir_get = '/bay200/mseed_online/archive/'
+        dataDir_get = '/bay200/mseed_online/archive/'
         fileName = ".".join((net, sta, "." + chan + ".D",
                              origin_time.strftime("%Y.%j")))
         filePath = os.path.join(dataDir_get, origin_time.strftime("%Y"),
