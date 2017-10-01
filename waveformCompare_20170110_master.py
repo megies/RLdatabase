@@ -128,7 +128,7 @@ def data_from_file(net, sta, loc, chan, starttime, endtime):
 
     date = starttime
     while date <= endtime:
-        print 'Loading day %s ...' % date.strftime("%d.%m")
+        print 'Loading day %s ' % date.strftime("%d.%m")
         print 'PFO digital demodulated.'
         mseed_file = "%s/%s.%s..%s.%s.%s" % \
             (DFM_dir, net, sta, chan, date.strftime("%Y"), date.strftime("%j"))
@@ -174,15 +174,16 @@ def download_data(origin_time, net, sta, loc, chan, source):
     #                          starttime=origin_time-190,
     #                          endtime=origin_time+3*3600+10)
     try:
-        print "Fetching data from FDSN client service..."
+        print "Fetching data from FDSN client service"
         c = fdsnClient(source)
         st = c.get_waveforms(network=net, station=sta, location='', 
                             channel=chan, starttime=origin_time-190,
                             endtime=origin_time+3*3600+10)
 
     except:
-        print "\tFailed, fetching data from file..."        
+        print "\tFailed, fetching data from file"        
         dataDir_get = '/bay200/mseed_online/archive/'
+        # dataDir_get = '/import/netapp-m-02-bay200/mseed_online/archive/' # LMU
         fileName = ".".join((net, sta, "." + chan + ".D",
                              origin_time.strftime("%Y.%j")))
         filePath = os.path.join(dataDir_get, origin_time.strftime("%Y"),
@@ -211,11 +212,11 @@ def download_data(origin_time, net, sta, loc, chan, source):
 
         if not st:
             raise RotationalProcessingException('Data not available for this'
-                                                                    ' event...')
+                                                                    ' event')
     st.trim(starttime=origin_time-180, endtime=origin_time+3*3600)
 
     print '\tDownload of', st[0].stats.station, st[0].stats.channel, \
-                                                            'data successful.'
+                                                            'data successful'
     return st
 
 
@@ -781,7 +782,8 @@ def filter_and_rotate(ac, rt, baz, rt_pcoda, ac_pcoda, cutoff, cutoff_pc,
     facp.filter('highpass', freq=cutoff_pc, corners=2, zerophase=True)
     frotate = rotate_ne_rt(facp.select(component=compN)[0].data,
                            facp.select(component=compE)[0].data, baz[2])
-    print 'Done'
+
+
     return rotate, pcod_rotate, pcoda_rotate, frtp, facp, frotate, cop_rt,\
         rt_band1, rt_band2, rt_band3, rt_band4, rt_band5, rt_band6, rt_band7,\
         rt_band8, rotate_band1, rotate_band2, rotate_band3, rotate_band4,\
@@ -1437,7 +1439,7 @@ def plotWaveformComp(event, station, link, mode, event_source, folder_name,
     MomentTensor, Magnitude, Region = Get_MomentTensor_Magnitude(link)
 
     # first image page: map with event location & information
-    print 'Page 1, map with station, event and great circle...'
+    print '\nPage 1, map with station, event and great circle'
     if is_local(baz) == 'local':
         plt.figure(figsize=(18, 9))
         plt.subplot2grid((4, 9), (0, 4), colspan=5, rowspan=4)
@@ -1709,7 +1711,7 @@ def plotWaveformComp(event, station, link, mode, event_source, folder_name,
 
     plt.savefig(folder_name + tag_name + '_page_1.png')
     plt.close()
-    print 'Completed and Saved.'
+    print 'Completed and Saved'
 
 
     # Preprocesing of rotational and translational signal
@@ -1721,11 +1723,11 @@ def plotWaveformComp(event, station, link, mode, event_source, folder_name,
     rt, ac, rt_pcoda, ac_pcoda, sec, cutoff, cutoff_pc = resample(
                                                     is_local(baz), baz, rt, ac)
 
-    print 'Removing instrument response...'
+    print 'Removing instrument response'
     rt, ac, rt_pcoda, ac_pcoda, displacement = remove_instr_resp(
                                     rt, ac, rt_pcoda, ac_pcoda,station, startev)
 
-    print 'Filtering and rotating...'
+    print 'Filtering and rotating'
     rotate, pcod_rotate, pcoda_rotate, frtp, facp, frotate, cop_rt, rt_band1,\
         rt_band2, rt_band3, rt_band4, rt_band5, rt_band6, rt_band7, rt_band8,\
         rotate_band1, rotate_band2, rotate_band3, rotate_band4, rotate_band5,\
@@ -1739,7 +1741,7 @@ def plotWaveformComp(event, station, link, mode, event_source, folder_name,
     displacement.filter('highpass', freq=0.005, corners=2, zerophase=True)
     displacement.taper(max_percentage=0.05)
 
-    print 'Getting arrival times...'
+    print 'Getting arrival times'
     # When the event starts in the fetched data
     init_sec = startev - ac[0].stats.starttime
 
@@ -1760,7 +1762,7 @@ def plotWaveformComp(event, station, link, mode, event_source, folder_name,
     #    rt[0].data = rt[0].data*(-1)  # if flipped, re-flip it!
 
     # Waveform comparison plot
-    print 'Page 2, waveform comparison plot...'
+    print '\nPage 2, waveform comparison plot'
     time = rt[0].stats.delta * np.arange(0, len(rt[0].data))  # Time in seconds
 
     rt.taper(max_percentage=0.05)
@@ -1905,13 +1907,12 @@ def plotWaveformComp(event, station, link, mode, event_source, folder_name,
 
     plt.savefig(folder_name + tag_name + '_page_2.png')
     plt.close()
-    print 'Completed and saved.'
+    print 'Completed and Saved'
 
 
 
     # cross-correlation analysis
-    print 'Obtaining zero-lag correlation coefficients for theoretical' \
-        ' backazimuth...'
+    print 'Zero-lag correlation coefficients'
     corrcoefs, thres = Get_corrcoefs(rt[0], rt[0].data, ac, rotate[1], sec,
                                      station)
     # calculate coefs for different frequency bands
@@ -1933,18 +1934,18 @@ def plotWaveformComp(event, station, link, mode, event_source, folder_name,
                                             rotate_band8[1], 6, station)
 
     # zero-lag correlation coefficients for range of backazimuths
-    print 'Backazimuth analysis...'
+    print 'Backazimuth analysis'
     corrbaz, maxcorr, backas, max_coefs_10deg = \
         backas_analysis(rt[0], rt[0].data, ac, sec, corrcoefs, None, station)
 
     X, Y = np.meshgrid(np.arange(0, sec * len(corrcoefs), sec), backas)
 
     # Estimating backazimuth
-    print 'Estimating backazimuth...'
+    print 'Estimating backazimuth'
     corrsum, backas2, max_ebaz_xcoef, best_ebaz = backas_est(rt, ac, min_sw, max_lwf, station)
 
     # calculate phase veloc. for windows where corrcoef is good enough (.75)
-    print 'Calculating phase velocities...'
+    print 'Calculating phase velocities'
 
     # calculate startindex for phase velocity calculation in frequency bands:
     # starts at the beginning of surface wave arrivals as body waves are
@@ -1991,11 +1992,16 @@ def plotWaveformComp(event, station, link, mode, event_source, folder_name,
     phasv_means,phasv_stds = [],[]
     for ksk in [phasv_band1, phasv_band2, phasv_band3, phasv_band4,
                         phasv_band5, phasv_band6, phasv_band7, phasv_band8]:
-        phasv_means.append(np.mean(ksk))
-        phasv_stds.append(np.std(ksk))
+        # make sure array isnt empty
+        if len(ksk) != 0:
+            phasv_means.append(np.mean(ksk))
+            phasv_stds.append(np.std(ksk))
+        else:
+            phasv_means.append(np.NaN)
+            phasv_stds.append(np.NaN)
 
 
-    print 'Page 3, cross-correlation and phase velocity figures...'
+    print '\nPage 3, cross-correlation and phase velocity figures'
 
     plt.figure(figsize=(18, 9))
     plt.subplot2grid((4, 26), (0, 0), colspan=25)
@@ -2073,12 +2079,11 @@ def plotWaveformComp(event, station, link, mode, event_source, folder_name,
     
     plt.savefig(folder_name + tag_name + '_page_3.png')
     plt.close()
-    print 'Completed and saved.'
+    print 'Completed and Saved'
 
 
-    print '\nAnalyzing rotations in the P-coda...'
-    print 'Obtaining zero-lag correlation coefficients for theoretical' \
-        ' backazimuth...'
+    print 'Analyzing rotations in the P-coda'
+    print 'Zero-lag correlation coefficients'
 
     if is_local(baz)=="non-local":
         sec_p = 5
@@ -2094,7 +2099,7 @@ def plotWaveformComp(event, station, link, mode, event_source, folder_name,
     corrcoefs_p, thres_p = Get_corrcoefs(rt_pcoda[0], rt_pcodaxc, facp,
                                             pcoda_rotatexc, sec_p, station)
 
-    print 'Backazimuth analysis...'
+    print 'Backazimuth analysis'
 
     ac_pc_SR = int(ac_pcoda[0].stats.sampling_rate)
     ind = max_lwi * facp[0].stats.sampling_rate
@@ -2118,7 +2123,7 @@ def plotWaveformComp(event, station, link, mode, event_source, folder_name,
         else:
             maxcorrp_over50.append(0)
 
-    print 'Page 4, cross-correlation for P-coda...'
+    print '\nPage 4, cross-correlation for P-coda'
     plt.figure(figsize=(18, 9))
     plt.subplot2grid((5, 26), (0, 0), colspan=25)
     plt.plot(time_p, ac_pcoda.select(component='Z')[0].data, color='g')
@@ -2185,10 +2190,10 @@ def plotWaveformComp(event, station, link, mode, event_source, folder_name,
    
     plt.savefig(folder_name + tag_name + '_page_4.png')
     plt.close()
-    print 'Completed and saved.'
+    print 'Completed and Saved'
 
 
-    print 'Storing event information in JSON and XML...'
+    print 'Storing event information in JSON and XML'
     store_info_json(rotate, ac, rt, corrcoefs, baz, arriv_p, EBA, folder_name,
                     tag_name, station, phasv_means, phasv_stds, startev, event, 
                     net_r, net_s, chan1, chan2, chan3, chan4, sta_r, sta_s, 
@@ -2197,7 +2202,7 @@ def plotWaveformComp(event, station, link, mode, event_source, folder_name,
 
     store_info_xml(folder_name,tag_name)
 
-    print 'Completed and saved.'
+    print 'Completed and Saved'
 
 if __name__ == '__main__':
 
@@ -2252,7 +2257,7 @@ if __name__ == '__main__':
     check_files = args.check_files
     polarity = args.polarity
     instrument = args.instrument.upper()
-    print '\nDownloading Events...'
+    print '\nDownloading Events'
 
     # This link leads to the quakeml webpage of a certain event on IRIS.
     # The fetched xml provides a moment tensor data for the beachballs.
@@ -2306,21 +2311,21 @@ if __name__ == '__main__':
     if not os.path.exists(output_path): 
         os.makedirs(output_path)
 
-    print 'Downloaded %i events. Beginning processing...' % len(cat)
+    print 'Downloaded %i events. Beginning processing' % len(cat)
     contador1 = contador2 = contador3 = 0
     for event in cat:
 
         # print event divider
-        event_information = str(event).split('\n')[0]
-        print '_'*79+'\n'
-        print event_information
-        print '_'*79
+        event_information = str(event).split('\n')[0][7:]
+        flinn_engdahl = event.event_descriptions[0]['text']
+        bars = '_'*79
+        print '{}\n{}\n{}\n{}'.format(bars,flinn_engdahl,event_information,bars)
+
         try:
             # create tags for standard filenaming
             mag_tag = str(event.magnitudes[0]['mag'])
 
             # Flinn Engdahl region, i.e. SOUTHEAST_OF_HONSHU_JAPAN
-            flinn_engdahl = event.event_descriptions[0]['text'].splitlines()[0]
             substitutions = [(', ', '_'),(' ','_')]
             for search, replace in substitutions:
                 flinn_engdahl = flinn_engdahl.replace(search,replace)
