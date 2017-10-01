@@ -54,9 +54,15 @@ in the subplot 3 on page 3.
 
 + 28.09.17 - To-change log: 
     -Get_corrcoeffs: clean up the cross correlation for loops
-    -backas_analysis: using wrong sampling rates?
     -phas_vel: numpy mean of empty slice throwing runtime warning
     -filter_and_rotate: can compress the different filter bands into a few lines
+    -resample: no else finish - may throw error?
+    -plot_wa...: figure out what to do with the flip call
+        -minimize misfit or waterlevel method at taper
+    -phase velocities:
+        threshold value of corrcoef as a parameter
+        phase velocity estimation by misfit minimization
+
 """
 import os
 import json
@@ -85,14 +91,11 @@ from obspy.signal.cross_correlation import xcorr
 from obspy.core.util.attribdict import AttribDict
 from obspy.geodetics.base import gps2dist_azimuth, locations2degrees
 
-
 # if matplotlib.__version__ < '1.0':  # Matplotlib 1.0 or newer is necessary
 #     raise ValueError('I need Matplotlib version 1.0 or newer.')
 
-
 class RotationalProcessingException(Exception):
     pass
-
 
 def data_from_file(net, sta, loc, chan, starttime, endtime):
     """
@@ -174,7 +177,7 @@ def download_data(origin_time, net, sta, loc, chan, source):
                             endtime=origin_time+3*3600+10)
 
     except:
-        print "trying to fetch data from file..."        
+        print "failed, trying to fetch data from file..."        
         dataDir_get = '/bay200/mseed_online/archive/'
         fileName = ".".join((net, sta, "." + chan + ".D",
                              origin_time.strftime("%Y.%j")))
@@ -200,7 +203,7 @@ def download_data(origin_time, net, sta, loc, chan, source):
                 st = read(filePath, starttime = origin_time - 180,
                       endtime = origin_time + 3 * 3600)
         else:
-            print "++++ cannot find the following file: \n %s \n++++" % filePath
+            print "cannot find the following file: \n %s \n" % filePath
 
         if not st:
             raise RotationalProcessingException('Data not available for this'
@@ -208,14 +211,14 @@ def download_data(origin_time, net, sta, loc, chan, source):
     st.trim(starttime=origin_time-180, endtime=origin_time+3*3600)
 
     print 'Download of', st[0].stats.station, st[0].stats.channel, \
-        'data successful!'
+                                                            'data successful!'
     return st
 
 
-def event_info_data(event, station, mode, polarity):
+def event_info_data(event, station, mode, polarity, instrument):
 
     """
-    It extracts information from the event and generates variables containing
+    Extracts information from the event and generates variables containing
     the event latitude, longitude, depth, and origin time.
     Ringlaser (RLAS) and broadband signals (WET) are received from the
     download_data function.
@@ -229,6 +232,10 @@ def event_info_data(event, station, mode, polarity):
     :type mode: str
     :param mode: Defines if WET data are fetched from Neries ('neries')
         or an IRIS link ('link').
+    :type polarity: str
+    :param polarity: 'normal' or 'reverse' choice for rotation polarity
+    :type instrument: str
+    :param instrument: 'wet' or 'wetr' choice for translation data
     :rtype latter: float
     :return latter: Latitude of the event in degrees.
     :rtype lonter: float
@@ -268,6 +275,10 @@ def event_info_data(event, station, mode, polarity):
         chan2 = 'BHE'
         chan3 = 'BHN'
         chan4 = 'BHZ'
+
+        if instrument == 'LENNARTZ':
+            net_s = 'BW'
+            sta_S = 'WETR'
 
         # ringlaser signal
         rt = download_data(startev, net_r, sta_r, loc_r, chan1, source)
@@ -311,11 +322,12 @@ def event_info_data(event, station, mode, polarity):
     # theoretical event backazimuth and distance
     baz = gps2dist_azimuth(latter, lonter, rt[0].stats.coordinates.latitude,
                           rt[0].stats.coordinates.longitude)
+    
     # Great circle distance
-
     gcdist = locations2degrees(latter, lonter,
                                rt[0].stats.coordinates.latitude,
                                rt[0].stats.coordinates.longitude)
+
     return latter, lonter, depth, startev, rt, ac, baz, gcdist, net_r, net_s,\
         chan1, chan2, chan3, chan4, sta_r, sta_s, loc_r, loc_s, source
 
@@ -362,6 +374,7 @@ def is_local(baz):
             is_local = 'local'
     else:
         is_local = 'non-local'
+
     return is_local
 
 
@@ -393,6 +406,7 @@ def Get_MomentTensor_Magnitude(link):
     for el in range(1, 7):
         value = float(xmlTag[el].firstChild.nodeValue)
         MomentTensor.append(value)
+
     return MomentTensor, Magnitude, Region
 
 
@@ -449,7 +463,7 @@ def resample(is_local, baz, rt, ac):
         ac.decimate(factor=4)
         sec = 120
         cutoff = 1.0  # Cut-off freq for the lowpass filter for non-loc events
-    else:
+    elif is_local == 'close':
         for trr in (rt + ac):
             trr.data = trr.data[0: int(1800 * rt[0].stats.sampling_rate)]
         rt_pcoda = rt.copy()
@@ -457,7 +471,8 @@ def resample(is_local, baz, rt, ac):
         rt.decimate(factor=2)
         ac.decimate(factor=2)
         sec = 3
-        cutoff = 4.0  # Cut-off freq for the lowpass filter for local events
+        cutoff = 4.0  # Cut-off freq for the lowpass filter for close events
+
     return rt, ac, rt_pcoda, ac_pcoda, sec, cutoff, cutoff_pc
 
 
@@ -794,7 +809,7 @@ def ps_arrival_times(distance, depth, init_sec):
     tt = TauPy_model.get_travel_times(
         distance_in_degree=0.001 * distance / 111.11, source_depth_in_km=depth)
     tiemp,tiems = [],[]
-    
+
     # from all possible P arrivals select the earliest one
     pwave_list = ['P','p','Pdiff','PKiKP','PKIKP','PP','Pb','Pn','Pg']
     for i2 in xrange(0, len(tt)):
@@ -1207,14 +1222,13 @@ def store_info_json(rotate, ac, rt, corrcoefs, baz, arriv_p, EBA, folder_name,
     :param station: Station from which data are fetched ('WET' or 'PFO').
     """
     compE, compN = station_components(station)
-    mxpt = np.argmax(rt[0].data, axis=0)
    
     PAT = max(rotate[1])  # Peak transverse acceleration [nm/s]
     PRZ = max(rt[0].data)  # Peak vertical rotation rate [nrad/s]
     PCC = max(corrcoefs)  # Peak correlation coefficient
     TBA = baz[2]  # Theoretical backazimuth [°]
-    SNT = sn_ratio(rotate[1], arriv_p, ac.select(component=compN)[
-                   0].stats.sampling_rate)  # SNR for transverse acceleration
+    SNT = sn_ratio(rotate[1], arriv_p, ac.select(component=compN)[0].
+                                        stats.sampling_rate)  # Transv. Acc SNR
     SNR = sn_ratio(rt[0].data, arriv_p, rt[0].stats.sampling_rate) # SNR for RR
     dic = OrderedDict([
             ('data', OrderedDict([
@@ -1380,8 +1394,8 @@ def store_info_xml(folder_name,tag_name):
                                     r"http://www.rotational-seismology.org"})
 
 
-def plotWaveformComp(event, station, link, mode, filter_e, event_source, 
-                                            folder_name, tag_name):
+def plotWaveformComp(event, station, link, mode, event_source, folder_name, 
+                                                                    tag_name):
 
     """
     Compares vertical rotation rate and transversal acceleration through
@@ -1400,58 +1414,55 @@ def plotWaveformComp(event, station, link, mode, filter_e, event_source,
     :type mode: str
     :param mode: Defines if WET data are fetched from Neries ('neries')
         or an IRIS link ('link').
+    :type folder_name: string
+    :param folder_name: Name of the folder containing the event.
+    :type tag_name: string
+    :param tag_name: Handle of the event.
     """
 
     # event information:
     latter, lonter, depth, startev, rt, ac, baz, gcdist, net_r, net_s, chan1,\
         chan2, chan3, chan4, sta_r, sta_s, loc_r, loc_s, source =\
-        event_info_data(event, station, mode, polarity)
+        event_info_data(event, station, mode, polarity, instrument)
     try:
         region = event.event_descriptions[0]['text']
         reg=True
     except:
         reg=False
-
-    Mw = float(str(event).split('\n')[0][57:60])
-
-    if filter_e == 'True':
-        a = -0.8583925  # a,b: parameters of logarithmic curve
-        b = 0.76685464
-        Mag = b * np.log(0.001 * baz[0]) + a  # required magnitude for process
-        if Mag > Mw:
-            print 'The event does probably not allow for velocity estimates as'\
-                'distance is too large or magnitude too small'
-            os.rmdir(folder_name)
-            return
     
     MomentTensor, Magnitude, Region = Get_MomentTensor_Magnitude(link)
-    # first page: map with event location & information
-    print 'Plotting map with station, event and great circle...'
+
+    # first image page: map with event location & information
+    print 'Page 1, map with station, event and great circle...'
     if is_local(baz) == 'local':
         plt.figure(figsize=(18, 9))
-
         plt.subplot2grid((4, 9), (0, 4), colspan=5, rowspan=4)
 
         # conic map plot
-        map = Basemap(projection='lcc', lat_0=(rt[0].stats.coordinates.
-                      latitude + latter) / 2, lon_0=(rt[0].stats.coordinates.
-                      longitude + lonter) / 2, resolution='i', width=3000000,
-                      height=2000000)
+        map = Basemap(projection='lcc', 
+                        lat_0=(rt[0].stats.coordinates.latitude + latter) / 2, 
+                        lon_0=(rt[0].stats.coordinates.longitude + lonter) / 2, 
+                        resolution='i', width=3000000, height=2000000)
         map.drawparallels(np.arange(0., 90, 5.), labels=[1, 0, 0, 1])
         map.drawmeridians(np.arange(0., 360., 5.), labels=[1, 0, 0, 1])
         map.drawstates(linewidth=0.25)
+
     elif is_local(baz) == 'non-local' and baz[0] <= 13000000:
         plt.figure(figsize=(18, 9))
         plt.subplot2grid((4, 9), (0, 4), colspan=5, rowspan=4)
+
         # globe plot
-        map = Basemap(projection='ortho', lat_0=(rt[0].stats.coordinates.
-                      latitude + latter) / 2, lon_0=(rt[0].stats.coordinates.
-                      longitude + lonter) / 2, resolution='l')
+        map = Basemap(projection='ortho', 
+                        lat_0=(rt[0].stats.coordinates.latitude + latter) / 2, 
+                        lon_0=(rt[0].stats.coordinates.longitude + lonter) / 2, 
+                        resolution='l')
         map.drawmeridians(np.arange(0, 360, 30))
         map.drawparallels(np.arange(-90, 90, 30))
+
     elif is_local(baz) == 'non-local' and baz[0] > 13000000:
         plt.figure(figsize=(18, 9))
         plt.subplot2grid((4, 9), (0, 4), colspan=5, rowspan=4)
+
         # If the great circle between the station and event is crossing the
         # 180° meridian in the pacific and the stations are far apart the map
         # has to be re-centered, otherwise we would see the wrong side of the
@@ -1460,31 +1471,37 @@ def plotWaveformComp(event, station, link, mode, filter_e, event_source,
             lon0 = 180 + (rt[0].stats.coordinates.longitude + lonter) / 2
         else:
             lon0 = (rt[0].stats.coordinates.longitude + lonter) / 2
+
         map = Basemap(projection='moll', lon_0=lon0, resolution='l')
         map.drawmeridians(np.arange(0, 360, 30))
         map.drawparallels(np.arange(-90, 90, 30))
+
     else:
         plt.figure(figsize=(26, 13))
-        plt.title('Event: %s %s\n \n '
-                  % (startev.date, startev.time), fontsize=24, fontweight='bold')
+        plt.title('Event: %s %s\n \n ' %
+                (startev.date, startev.time), fontsize=24, fontweight='bold')
         plt.subplot2grid((4, 9), (0, 4), colspan=5, rowspan=4)
+
         # conic map plot
-        map = Basemap(projection='lcc', lat_0=(rt[0].stats.coordinates.
-                      latitude + latter) / 2, lon_0=(rt[0].stats.coordinates.
-                      longitude + lonter) / 2, resolution='i', width=600000,
-                      height=400000)
+        map = Basemap(projection='lcc', 
+                        lat_0=(rt[0].stats.coordinates.latitude + latter) / 2, 
+                        lon_0=(rt[0].stats.coordinates.longitude + lonter) / 2, 
+                        resolution='i', width=600000, height=400000)
         map.drawparallels(np.arange(0., 90, 2.), labels=[1, 0, 0, 1])
         map.drawmeridians(np.arange(0., 360., 2.), labels=[1, 0, 0, 1])
         map.drawrivers(linewidth=0.25, color='b')
         map.drawstates(linewidth=0.25)
 
+    # basemap boundary settings
     map.drawcoastlines(linewidth=0.25)
     map.drawcountries(linewidth=0.25)
     map.fillcontinents(color='coral', lake_color='lightblue')
     map.drawmapboundary(fill_color='lightblue')
+
     if is_local(baz) == 'local' or is_local(baz) == 'close':
         map.drawlsmask(land_color='coral', ocean_color='lightblue', lakes=True)
         map.drawcountries(linewidth=0.6)
+   
     map.drawgreatcircle(lonter, latter, rt[0].stats.coordinates.longitude,
                         rt[0].stats.coordinates.latitude, linewidth=3,
                         color='yellow')
@@ -1492,17 +1509,17 @@ def plotWaveformComp(event, station, link, mode, filter_e, event_source,
     # Add beachballs for the event and station triangle
     if station == 'WET':
         x, y = map(lonter, latter)
-        statlon, statlat = map(rt[0].stats.coordinates.longitude, rt[0].stats.
-                               coordinates.latitude)
+        statlon, statlat = map(rt[0].stats.coordinates.longitude, 
+                                rt[0].stats.coordinates.latitude)
 
         if is_local(baz) == 'non-local':
             map.scatter(statlon, statlat, 200, color="b", marker="v",
-                        edgecolor="k", zorder=100)
+                                                     edgecolor="k", zorder=100)
             plt.text(statlon + 200000, statlat, 'WET', va="top",
-                     family="monospace", weight="bold", zorder=101,
-                     color='k', backgroundcolor='white')
-            map.scatter(x, y, 200, color="b", marker="*",
-                        edgecolor="k", zorder=100)
+                                family="monospace", weight="bold", zorder=101,
+                                color='k', backgroundcolor='white')
+            map.scatter(x, y, 200, color="b", marker="*", edgecolor="k", 
+                                                                    zorder=100)
 
             if mode == 'link':
                 plt.subplot2grid((4, 9), (1, 0), colspan=2)
@@ -1568,12 +1585,12 @@ def plotWaveformComp(event, station, link, mode, filter_e, event_source,
 
         else:
             map.scatter(statlon, statlat, 200, color="b", marker="v",
-                        edgecolor="k", zorder=100)
+                                                    edgecolor="k", zorder=100)
             plt.text(statlon + 35000, statlat, 'WET', fontsize=12, va="top",
-                     family="monospace", weight="bold", zorder=101,
-                     color='k', backgroundcolor='white')
-            map.scatter(x, y, 300, color="b", marker="*",
-                        edgecolor="k", zorder=100)
+                                family="monospace", weight="bold", zorder=101,
+                                color='k', backgroundcolor='white')
+            map.scatter(x, y, 300, color="b", marker="*", edgecolor="k", 
+                                                                    zorder=100)
 
             if mode == 'link':
                 plt.subplot2grid((4, 9), (1, 0), colspan=2)
@@ -1606,8 +1623,8 @@ def plotWaveformComp(event, station, link, mode, filter_e, event_source,
 
             else:
                 plt.subplot2grid((4, 9), (1, 0), colspan=2)
-                plt.title(u'Event: %s %s\n' % (startev.date, startev.time), fontsize=20,
-                          weight='bold')
+                plt.title(u'Event: %s %s\n' % (startev.date, startev.time), 
+                                                    fontsize=20, weight='bold')
                 ax = plt.gca()
                 ax.axis('equal')
                 ax.axis('off')
@@ -1617,13 +1634,13 @@ def plotWaveformComp(event, station, link, mode, filter_e, event_source,
                     plt.title(u'\n\nRegion: %s \n\nMagnitude: %s \n\nDistance: %.2f [km] - %.2f [°]\n\nDepth: %.2f [km]'
                               % (region, str(event).split('\n')[0][57:64], 0.001 * baz[0],
                                  0.001 * baz[0] / 111.11, depth),
-                              fontsize=18, fontweight='bold')
+                                                 fontsize=18, fontweight='bold')
                 else:
                     plt.title(u'\nMagnitude: %s \n\nDistance: %.2f [km] - %.2f [°]'
                               '\n\nDepth: %.2f [km]'
                               % (str(event).split('\n')[0][57:64], 0.001 * baz[0],
-                                 0.001 * baz[0] / 111.11, depth), fontsize=18,
-                              fontweight='bold')
+                                 0.001 * baz[0] / 111.11, depth), 
+                                                fontsize=18,fontweight='bold')
                 ax = plt.gca()
                 ax.axis('off')
                 plt.subplot2grid((4, 9), (3, 0), colspan=2)
@@ -1641,31 +1658,32 @@ def plotWaveformComp(event, station, link, mode, filter_e, event_source,
 
         if is_local(baz) == 'local':
             map.scatter(x, y, 600, color="b", marker="*", edgecolor="k",
-                        zorder=100)
+                                                                    zorder=100)
             map.scatter(statlon, statlat, 700, color="b", marker="v",
-                        edgecolor="k", zorder=100)
+                                                    edgecolor="k", zorder=100)
             plt.text(statlon + 27000, statlat, 'PFO', fontsize=18, va="top",
-                     family="monospace", weight="bold", zorder=101,
-                     color='k', backgroundcolor='white')
+                                family="monospace", weight="bold", zorder=101,
+                                 color='k', backgroundcolor='white')
         elif is_local(baz) == 'non-local':
             map.scatter(x, y, 200, color="b", marker="*", edgecolor="k",
-                        zorder=100)
+                                                                     zorder=100)
             map.scatter(statlon, statlat, 300, color="b", marker="v",
-                        edgecolor="k", zorder=100)
+                                                    edgecolor="k", zorder=100)
             plt.text(statlon + 200000, statlat, 'PFO', va="top",
-                     family="monospace", weight="bold", zorder=101,
-                     color='k', backgroundcolor='white')
+                                family="monospace", weight="bold", zorder=101,
+                                color='k', backgroundcolor='white')
         else:
             map.scatter(x, y, 250, color="b", marker="*", edgecolor="k",
-                        zorder=100)
+                                                                     zorder=100)
             map.scatter(statlon, statlat, 400, color="b", marker="v",
-                        edgecolor="k", zorder=100)
+                                                      edgecolor="k", zorder=100)
             plt.text(statlon + 6000, statlat + 1000, 'PFO', va="top",
-                     family="monospace", weight="bold", zorder=101,
-                     color='k', backgroundcolor='white', fontsize=18)
+                                  family="monospace", weight="bold", zorder=101,
+                             color='k', backgroundcolor='white', fontsize=18)
 
         plt.subplot2grid((4, 9), (1, 0), colspan=2)
-        plt.title(u'Event: %s %s\n' % (startev.date, startev.time), fontsize=20, weight='bold')
+        plt.title(u'Event: %s %s\n' % (startev.date, startev.time), 
+                                                    fontsize=20, weight='bold')
         ax = plt.gca()
         ax.axis('equal')
         ax.axis('off')
@@ -1685,9 +1703,10 @@ def plotWaveformComp(event, station, link, mode, filter_e, event_source,
         ax = plt.gca()
         ax.axis('off')
 
-    print 'Done.'
     plt.savefig(folder_name + tag_name + '_page_1.png')
     plt.close()
+    print 'Completed and Saved.'
+
 
     # Preprocesing of rotational and translational signal
 
@@ -1695,8 +1714,8 @@ def plotWaveformComp(event, station, link, mode, filter_e, event_source,
     # + resample signal accordingly
     # + Different cut-off frequency for the lowpass filter,
     #   depending on the epicentral distance
-    rt, ac, rt_pcoda, ac_pcoda, sec, cutoff, cutoff_pc =\
-        resample(is_local(baz), baz, rt, ac)
+    rt, ac, rt_pcoda, ac_pcoda, sec, cutoff, cutoff_pc = resample(
+                                                    is_local(baz), baz, rt, ac)
 
     print 'Removing instrument response...'
     rt, ac, rt_pcoda, ac_pcoda, displacement = remove_instr_resp(
@@ -1715,19 +1734,15 @@ def plotWaveformComp(event, station, link, mode, filter_e, event_source,
     displacement.filter('lowpass', freq=cutoff, corners=2, zerophase=True)
     displacement.filter('highpass', freq=0.005, corners=2, zerophase=True)
     displacement.taper(max_percentage=0.05)
-    
-    # plt.plot(displacement_rot[1]/np.abs(max(displacement_rot[1])),'k')
-    # plt.plot(rotate[1]/np.abs(max(rotate[1])),'g')
-    # plt.show()
 
     print 'Getting arrival times...'
-    init_sec = startev - ac[0].stats.starttime
     # When the event starts in the fetched data
+    init_sec = startev - ac[0].stats.starttime
 
     arriv_p, arriv_s = ps_arrival_times(baz[0], depth, init_sec)
 
     min_pw, max_pw, min_sw, max_sw, min_lwi, max_lwi, min_lwf, max_lwf =\
-        time_windows(baz, arriv_p, arriv_s, init_sec, is_local(baz))
+                    time_windows(baz, arriv_p, arriv_s, init_sec, is_local(baz))
 
 
     # test if ring laser signal is flipped, which happened a few times:
@@ -1735,29 +1750,25 @@ def plotWaveformComp(event, station, link, mode, filter_e, event_source,
     # st_rt = st_rt/np.max(np.abs(st_rt))
     # st_ac = rotate[1][int(rt[0].stats.sampling_rate*min_lwi):int(rt[0].stats.sampling_rate*max_lwi)]
     # st_ac = st_ac/np.max(np.abs(st_ac))
-    #testCC = xcorr(st_rt, st_ac, shift_len=100, full_xcorr=True) 
+    # testCC = xcorr(st_rt, st_ac, shift_len=100, full_xcorr=True) 
 
-    #if testCC[1] < -0.8:  # if the CC is highly negative, the signal is flipped
-     #   rt[0].data = rt[0].data*(-1)  # if flipped, re-flip it!
+    # if testCC[1] < -0.8:  # if the CC is highly negative, the signal is flipped
+    #    rt[0].data = rt[0].data*(-1)  # if flipped, re-flip it!
 
     # Waveform comparison plot
-    print 'Waveform comparison plot...'
+    print 'Page 2, waveform comparison plot...'
     time = rt[0].stats.delta * np.arange(0, len(rt[0].data))  # Time in seconds
-    # phase velocity determination
-    # TODO minimize misfit or waterlevel method
-    # TAPER
+
     rt.taper(max_percentage=0.05)
     fact1 = 2 * max(rt[0].data)  # Factor to displace the rotation rate
-
     c1 = .5 * max(abs(rotate[1])) / max(abs(rt[0].data))  # Vel in m/s
 
+    # plotting
     plt.figure(figsize=(18, 9))
     plt.subplot2grid((6, 5), (2, 0), colspan=5, rowspan=2)
     plt.plot(time, rt[0].data, color='r', label=ur'Rotation rate')
-
-    plt.plot(time, (0.5 / c1) *
-             rotate[1] + fact1, color='k', label=ur'Transversal acceleration')
-
+    plt.plot(time, (0.5 / c1) * rotate[1] + fact1, 
+                                color='k', label=ur'Transversal acceleration')
     plt.xlabel(ur'Time [s]', fontweight='bold', fontsize=13)
     plt.ylabel(
         ur'$\dot{\mathbf{\Omega}}_\mathbf{z}$ [nrad/s] - a$_\mathbf{T}$/2c'
@@ -1770,6 +1781,7 @@ def plotWaveformComp(event, station, link, mode, filter_e, event_source,
         xgap = 50
     else:
         xgap = 15
+
     xlim1 = rt[0].stats.delta * len(rt[0].data)  # needed for p-coda later
     bbox_props = dict(boxstyle="square, pad=0.3", fc='white')
     plt.axvline(x=min_pw, linewidth=1)
@@ -1788,24 +1800,21 @@ def plotWaveformComp(event, station, link, mode, filter_e, event_source,
               % (startev.date, startev.time))
     plt.grid(True)
     plt.legend(loc=7,shadow=True)
+
     # P coda
     plt.subplot2grid((6, 5), (0, 0), colspan=2)
-
-    # set sampling rate as integer values to avoid deprecation
-    cop_rt_SR = int(cop_rt[0].stats.sampling_rate)
+    cop_rt_SR = int(cop_rt[0].stats.sampling_rate) # integer not float
     rt_SR = int(rt[0].stats.sampling_rate)
 
     cp = 0.5 * (max(abs(pcod_rotate[1][cop_rt_SR * min_pw:cop_rt_SR * max_pw]))/
              max(abs(cop_rt[0].data[cop_rt_SR * min_pw:cop_rt_SR * max_pw])))
     minamp1_pcod = min((0.5 / cp) * 
-                            pcod_rotate[1][rt_SR * min_pw:rt_SR * max_pw])
+                                pcod_rotate[1][rt_SR * min_pw:rt_SR * max_pw])
     minamp2_pcod = min(cop_rt[0].data[rt_SR * min_pw:rt_SR * max_pw])
 
     maxamp1_pcod = max((0.5 / cp) * 
                             pcod_rotate[1][rt_SR * min_pw:rt_SR * max_pw])
     maxamp2_pcod = max(cop_rt[0].data[rt_SR * min_pw:rt_SR * max_pw])
-
-# FROM HERE OKAY DELETE MARKER
 
     plt.plot(time, cop_rt[0].data, color='r')
     plt.plot(time, (0.5 / cp) * pcod_rotate[1], color='k')
@@ -1818,6 +1827,7 @@ def plotWaveformComp(event, station, link, mode, filter_e, event_source,
         '[1/s]', fontweight='bold', fontsize=11)
     plt.title(u'1: P-coda (Highpass, cut-off: %.1f Hz)' % cutoff_pc)
     plt.grid(True)
+
 
     # S wave
     plt.subplot2grid((6, 5), (0, 3), colspan=2)
@@ -1842,6 +1852,7 @@ def plotWaveformComp(event, station, link, mode, filter_e, event_source,
     plt.title(u'2: S-wave (Lowpass, cut-off: %s Hz)' % (cutoff))
     plt.grid(True)
 
+
     # surface waves
     plt.subplot2grid((6, 5), (5, 0), colspan=2)
     cl1 = 0.5 * (max(abs(rotate[1][rt_SR * min_lwi:rt_SR * max_lwi])) /
@@ -1865,6 +1876,7 @@ def plotWaveformComp(event, station, link, mode, filter_e, event_source,
               % (cutoff))
     plt.grid(True)
 
+
     # later surface waves
     plt.subplot2grid((6, 5), (5, 3), colspan=2)
     cl2 = 0.5 * (max(abs(rotate[1][rt_SR * min_lwf:rt_SR * max_lwf])) /
@@ -1883,15 +1895,17 @@ def plotWaveformComp(event, station, link, mode, filter_e, event_source,
     plt.xlabel(ur'Time [s]', fontsize=11, fontweight='bold')
     plt.ylabel(
         ur'$\dot{\mathbf{\Omega}}_\mathbf{z}$ [rad/s] - a$_\mathbf{T}$/2c'
-        '[1/s]', fontsize=11, fontweight='bold')
-    plt.title(ur'4: Later surface waves (Lowpass, cut-off: %s Hz)'
-              % (cutoff))
+                                        '[1/s]', fontsize=11, fontweight='bold')
+    plt.title(ur'4: Later surface waves (Lowpass, cut-off: %s Hz)' % (cutoff))
     plt.grid(True)
-    print 'Done.'
+
     plt.savefig(folder_name + tag_name + '_page_2.png')
     plt.close()
+    print 'Completed and saved.'
 
-    # Cross-correlation analysis
+
+
+    # cross-correlation analysis
     print 'Obtaining zero-lag correlation coefficients for theoretical' \
         ' backazimuth...'
     corrcoefs, thres = Get_corrcoefs(rt[0], rt[0].data, ac, rotate[1], sec,
@@ -1926,18 +1940,16 @@ def plotWaveformComp(event, station, link, mode, filter_e, event_source,
     corrsum, backas2, max_ebaz_xcoef, best_ebaz = backas_est(rt, ac, min_sw, max_lwf, station)
 
     # calculate phase veloc. for windows where corrcoef is good enough (.75)
-    # optional TODO: threshold value of corrcoef as a parameter
-    # TODO phase velocity estimation by misfit minimization
-    print 'Phase velocities...'
+    print 'Calculating phase velocities...'
 
     # calculate startindex for phase velocity calculation in frequency bands:
     # starts at the beginning of surface wave arrivals as body waves are
     # not appropriate
     ind_surf = int(min_lwi/sec)
-
-    ind_band = False  # indicator that we are dealing with bands 1-8
+    ind_band = False  # indicator that we are not dealing with bands 1-8
     phasv, EBA = phase_vel(rt, sec, corrcoefs, rotate, corrsum, backas2,
                            ind_band, ind_surf)
+
     # calculates phase velocities for different frequency bands -
     # -> put EBA_bandx here instead of EBA and backas2_bandx,...
     # for frequency dependent EBA
@@ -1959,8 +1971,10 @@ def plotWaveformComp(event, station, link, mode, filter_e, event_source,
                                   corrsum, backas2, ind_band, ind_surf)
     phasv_band8, EBA8 = phase_vel(rt_band8, 6, corrcoefs_band8, rotate_band8,
                                   corrsum, backas2, ind_band, ind_surf)
+    
     ind_band = False
-    phasv_band1 = phasv_band1[~np.isnan(phasv_band1)]  # filters out all NaN
+    # filter out NaNs
+    phasv_band1 = phasv_band1[~np.isnan(phasv_band1)] 
     phasv_band2 = phasv_band2[~np.isnan(phasv_band2)]
     phasv_band3 = phasv_band3[~np.isnan(phasv_band3)]
     phasv_band4 = phasv_band4[~np.isnan(phasv_band4)]
@@ -1969,62 +1983,29 @@ def plotWaveformComp(event, station, link, mode, filter_e, event_source,
     phasv_band7 = phasv_band7[~np.isnan(phasv_band7)]
     phasv_band8 = phasv_band8[~np.isnan(phasv_band8)]
 
-    plt.figure()
-    ax = plt.subplot(111)
-    lens = len(phasv_band1) + len(phasv_band2) + len(phasv_band3) + \
-        len(phasv_band4) + len(phasv_band5) + len(phasv_band6) + \
-        len(phasv_band7) + len(phasv_band8)
-    arr = np.zeros((lens, 4))
-    leni = 0
-    for phasv_band in [phasv_band1, phasv_band2, phasv_band3, phasv_band4,
-                       phasv_band5, phasv_band6, phasv_band7, phasv_band8]:
-        arr[leni:leni + len(phasv_band), 0] = phasv_band
-        leni += len(phasv_band)
-    arr[:, 2] = [depth]*lens  # source depth
-    arr[:, 3] = [0.001 * baz[0]]*lens  # epicentral distance
-
-    l1 = len(phasv_band1)
-    l2 = len(phasv_band2)
-    l3 = len(phasv_band3)
-    l4 = len(phasv_band4)
-    l5 = len(phasv_band5)
-    l6 = len(phasv_band6)
-    l7 = len(phasv_band7)
-    l8 = len(phasv_band8)
-
-    arr[:l1, 1] = [1. / 0.015] * len(phasv_band1)
-    arr[l1:l1+l2, 1] = [1. / 0.03] * len(phasv_band2)
-    arr[l1+l2:l1+l2+l3, 1] = [1./0.07]*len(phasv_band3)
-    arr[l1+l2+l3:l1+l2+l3+l4, 1] = [1./0.15]*len(phasv_band4)
-    arr[l1+l2+l3+l4:l1+l2+l3+l4+l5, 1] = [1./0.25]*len(phasv_band5)
-    arr[l1+l2+l3+l4+l5:l1+l2+l3+l4+l5+l6, 1] = [1./0.35]*len(phasv_band6)
-    arr[l1+l2+l3+l4+l5+l6:l1+l2+l3+l4+l5+l6+l7, 1] = [1./0.5]*len(phasv_band7)
-    arr[l1+l2+l3+l4+l5+l6+l7:l1+l2+l3+l4+l5+l6+l7+l8, 1] =\
-        [1./0.8]*len(phasv_band8)
-
-    phasv_means = []
-    phasv_stds = []
+    # phase velocity mean values and std. (individual freqs.) for json file
+    phasv_means,phasv_stds = [],[]
     for ksk in [phasv_band1, phasv_band2, phasv_band3, phasv_band4,
-                phasv_band5, phasv_band6, phasv_band7, phasv_band8]:
+                        phasv_band5, phasv_band6, phasv_band7, phasv_band8]:
         phasv_means.append(np.mean(ksk))
-        # calculates means for single f-bands and appends them to a list
         phasv_stds.append(np.std(ksk))
 
-    print 'Cross-correlation and phase velocity figures...'
+
+    print 'Page 3, cross-correlation and phase velocity figures...'
 
     plt.figure(figsize=(18, 9))
     plt.subplot2grid((4, 26), (0, 0), colspan=25)
     plt.plot(time, rt[0].data, color='r', label=ur'Rotation rate')
-    plt.plot(time, (1. / (2. * c1)) *
-             rotate[1] + fact1, color='k', label=ur'Transversal acceleration')
+    plt.plot(time, (1. / (2. * c1)) * rotate[1] + fact1, 
+                                color='k', label=ur'Transversal acceleration')
     plt.ylabel(
         ur'$\dot{\mathbf{\Omega}}_\mathbf{z}$ [nrad/s] - a$_\mathbf{T}$/2c '
         '[1/s]', fontsize=10, fontweight='bold')
     plt.xlim(0, rt[0].stats.delta * len(rt[0].data))
     plt.ylim(min(rt[0].data), fact1 + max((1. / (2. * c1)) * rotate[1]))
     plt.title(ur'Cross-correlation for $\dot\Omega_z$ and a$_T$ in %s seconds '
-              'time windows (lowpass, cutoff: %s Hz). Event: %s %s'
-              % (sec, cutoff, startev.date, startev.time))
+                          'time windows (lowpass, cutoff: %s Hz). Event: %s %s'
+                          % (sec, cutoff, startev.date, startev.time))
     plt.grid(True)
     plt.legend(loc=7,shadow=True)
     plt.subplot2grid((4, 26), (1, 0), colspan=25)
@@ -2035,12 +2016,14 @@ def plotWaveformComp(event, station, link, mode, filter_e, event_source,
     plt.xlim(0, rt[0].stats.delta * len(rt[0].data))
     plt.ylim(0, 16)
     plt.grid(True)
+
+
     fig = plt.subplot2grid((4, 26), (1, 25))
     cmap = mpl.cm.autumn_r
     norm = mpl.colors.Normalize(vmin=0.75, vmax=1)
     cb1 = mpl.colorbar.ColorbarBase(
-        fig, cmap=cmap, norm=norm, orientation='vertical',
-        ticks=[0.75, 0.8, 0.85, 0.9, 0.95, 1.0])
+                            fig, cmap=cmap, norm=norm, orientation='vertical',
+                            ticks=[0.75, 0.8, 0.85, 0.9, 0.95, 1.0])
     cb1.set_label(ur'X-corr. coeff.', fontweight='bold')
 
     plt.subplot2grid((4, 26), (2, 0), colspan=25)
@@ -2056,6 +2039,7 @@ def plotWaveformComp(event, station, link, mode, filter_e, event_source,
     plt.legend(loc=4, shadow=True)
     plt.grid(True)
 
+
     plt.subplot2grid((4, 26), (3, 0), colspan=25)
     teobaz = baz[2] * np.ones(len(corrcoefs) + 1)
     plt.pcolor(X, Y, corrbaz, cmap=plt.cm.RdYlGn_r, vmin=-1, vmax=1)
@@ -2063,6 +2047,7 @@ def plotWaveformComp(event, station, link, mode, filter_e, event_source,
     plt.plot(np.arange(0, sec * len(corrcoefs), sec), maxcorr, '.k')
     plt.text(1000, baz[2], str(baz[2])[0:5] + ur'°',
              bbox={'facecolor': 'black', 'alpha': 0.8}, color='r')
+
     if EBA == backas2[np.asarray(corrsum).argmax()]:
         obsbaz = EBA * np.ones(len(corrcoefs) + 1)
         plt.text(400, EBA, str(EBA)[0:5] + ur'°',
@@ -2077,15 +2062,17 @@ def plotWaveformComp(event, station, link, mode, filter_e, event_source,
     plt.grid(True)
     fig = plt.subplot2grid((4, 26), (3, 25))
     norm = mpl.colors.Normalize(vmin=-1, vmax=1)
-    cb1 = mpl.colorbar.ColorbarBase(
-        fig, cmap=plt.cm.RdYlGn_r, norm=norm, orientation='vertical')
+    cb1 = mpl.colorbar.ColorbarBase(fig, cmap=plt.cm.RdYlGn_r, norm=norm, 
+                                                        orientation='vertical')
     cb1.set_label(ur'X-corr. coeff.', fontweight='bold')
     cb1.set_ticks([-1.0,-0.75,-0.5,-0.25,0.0,0.25,0.5,0.75,1.0])
-    print 'Done.'
+    
     plt.savefig(folder_name + tag_name + '_page_3.png')
     plt.close()
+    print 'Completed and saved.'
 
-    print 'Analyzing rotations in the P-coda...'
+
+    print '\nAnalyzing rotations in the P-coda...'
     print 'Obtaining zero-lag correlation coefficients for theoretical' \
         ' backazimuth...'
 
@@ -2101,25 +2088,23 @@ def plotWaveformComp(event, station, link, mode, filter_e, event_source,
                                         facp[0].stats.sampling_rate)]
 
     corrcoefs_p, thres_p = Get_corrcoefs(rt_pcoda[0], rt_pcodaxc, facp,
-                                         pcoda_rotatexc, sec_p, station)
+                                            pcoda_rotatexc, sec_p, station)
 
     print 'Backazimuth analysis...'
 
     ac_pc_SR = int(ac_pcoda[0].stats.sampling_rate)
     ind = max_lwi * facp[0].stats.sampling_rate
 
-    corrbazp, maxcorrp, backas, max_coefs_10deg_p =\
-        backas_analysis(frtp[0], rt_pcodaxc, facp, sec_p, corrcoefs_p, ind,
-                        station)
+    corrbazp, maxcorrp, backas, max_coefs_10deg_p = backas_analysis(frtp[0], 
+                            rt_pcodaxc, facp, sec_p, corrcoefs_p, ind, station)
 
     Xp, Yp = np.meshgrid(np.arange(0, sec_p * len(corrcoefs_p), sec_p), backas)
 
     # TAPER
     rt_pcoda.taper(max_percentage=0.05)
-
     time_p = rt_pcoda[0].stats.delta * np.arange(0, len(rt_pcoda[0].data))
     fact1_p = 2 * max(rt_pcoda[0].data[0:max_lwi * ac_pc_SR])
-    c1_p = .5 * (max(abs(pcoda_rotate[1][0:max_lwi * ac_pc_SR])) /
+    c1_p = .5 * (max(abs(pcoda_rotate[1][0: max_lwi * ac_pc_SR])) /
                 max(abs(rt_pcoda[0].data[0: max_lwi * ac_pc_SR])))
 
     maxcorrp_over50 = []
@@ -2129,8 +2114,7 @@ def plotWaveformComp(event, station, link, mode, filter_e, event_source,
         else:
             maxcorrp_over50.append(0)
 
-    # print maxcorrp_over50
-    print 'Cross-correlation figure for the P-coda...'
+    print 'Page 4, cross-correlation for P-coda...'
     plt.figure(figsize=(18, 9))
     plt.subplot2grid((5, 26), (0, 0), colspan=25)
     plt.plot(time_p, ac_pcoda.select(component='Z')[0].data, color='g')
@@ -2141,33 +2125,35 @@ def plotWaveformComp(event, station, link, mode, filter_e, event_source,
              max(ac_pcoda.select(component='Z')[0].data[0:max_lwi * ac_pc_SR]))
     plt.title(ur'$\dot{\mathbf{\Omega}}_\mathbf{z}$ and a$_\mathbf{T}$'
               'correlation in the P-coda in a %d seconds time window'
-              ' (highpass, cutoff: 1 Hz). Event: %s %s' % (sec_p, startev.date, startev.time))
+              ' (highpass, cutoff: 1 Hz). Event: %s %s' % 
+                                            (sec_p, startev.date, startev.time))
     plt.axvline(x=min_pw, linewidth=1)
     plt.axvline(x=min_sw, linewidth=1)
     plt.subplot2grid((5, 26), (1, 0), colspan=25, rowspan=2)
     plt.plot(time_p, rt_pcoda[0].data, color='r', label=ur'Rotation rate')
     plt.plot(time_p, (0.5 / c1_p) * pcoda_rotate[1] + fact1_p, color='k',
-             label=ur'Transversal acceleration')
+                                             label=ur'Transversal acceleration')
     plt.ylabel(ur'$\dot{\mathbf{\Omega}}_\mathbf{z}$ [nrad/s] -'
-               'a$_\mathbf{T}$/2c [1/s]', fontweight='bold', fontsize=11)
+                   'a$_\mathbf{T}$/2c [1/s]', fontweight='bold', fontsize=11)
     plt.xlim(0, (min_lwi + max_lwi) // 2)
     plt.ylim(min(rt_pcoda[0].data[0: max_lwi * ac_pc_SR]), 
-                    fact1_p + max((1. / (2. * c1_p)) * 
-                    pcoda_rotate[1][0: max_lwi * ac_pc_SR]))
+                                        fact1_p + max((1. / (2. * c1_p)) * 
+                                        pcoda_rotate[1][0: max_lwi * ac_pc_SR]))
     xlim2 = (min_lwi + max_lwi) // 2
     box_yposition2 = (fact1_p + max((1. / (2. * c1_p)) * 
                         pcoda_rotate[1][0: max_lwi * ac_pc_SR]) -
                         np.abs(min(rt_pcoda[0].data[0: max_lwi * ac_pc_SR])))/2.
     plt.axvline(x=min_pw, linewidth=1)
-    plt.annotate('P-arrival', xy=(min_pw+xgap*float(xlim2/xlim1),
-                                  box_yposition2), fontsize=14,
-                 fontweight='bold', bbox=bbox_props)
+    plt.annotate('P-arrival', 
+                            xy=(min_pw+xgap*float(xlim2/xlim1),box_yposition2), 
+                            fontsize=14, fontweight='bold', bbox=bbox_props)
     plt.axvline(x=min_sw, linewidth=1)
-    plt.annotate('S-arrival', xy=(min_sw+xgap*float(xlim2/xlim1),
-                                  box_yposition2), fontsize=14,
-                 fontweight='bold', bbox=bbox_props)
+    plt.annotate('S-arrival', 
+                            xy=(min_sw+xgap*float(xlim2/xlim1),box_yposition2), 
+                            fontsize=14,fontweight='bold', bbox=bbox_props)
     plt.grid(True)
     plt.legend(loc=6, shadow=True)
+
 
     plt.subplot2grid((5, 26), (3, 0), colspan=25)
     plt.plot(np.arange(0, sec_p * len(corrcoefs_p), sec_p), corrcoefs_p, '.k')
@@ -2177,8 +2163,8 @@ def plotWaveformComp(event, station, link, mode, filter_e, event_source,
     plt.grid(True)
     plt.subplot2grid((5, 26), (4, 0), colspan=25)
     plt.pcolor(Xp, Yp, corrbazp, cmap=plt.cm.RdYlGn_r, vmin=-1, vmax=1)
-    plt.plot(np.arange(0, sec_p * len(corrcoefs_p), sec_p),
-             maxcorrp_over50, '.k')
+    plt.plot(np.arange(0, sec_p * len(corrcoefs_p), sec_p), 
+                                                        maxcorrp_over50, '.k')
     plt.xlim(0, (min_lwi + max_lwi) // 2)
     plt.xlabel(ur'Time [s]', fontweight='bold')
     plt.ylabel(ur'BAz [°]', fontweight='bold')
@@ -2188,31 +2174,26 @@ def plotWaveformComp(event, station, link, mode, filter_e, event_source,
 
     fig = plt.subplot2grid((5, 26), (4, 25))
     norm = mpl.colors.Normalize(vmin=-1, vmax=1)
-    cb1 = mpl.colorbar.ColorbarBase(
-        fig, cmap=plt.cm.RdYlGn_r, norm=norm, orientation='vertical')
+    cb1 = mpl.colorbar.ColorbarBase(fig, cmap=plt.cm.RdYlGn_r, norm=norm, 
+                                                        orientation='vertical')
     cb1.set_label(ur'X-corr. coeff.', fontweight='bold')
     cb1.set_ticks([-1.0,-0.75,-0.5,-0.25,0.0,0.25,0.5,0.75,1.0])
-    print 'Done.'
-    print 'Saving figures...'
+   
     plt.savefig(folder_name + tag_name + '_page_4.png')
     plt.close()
+    print 'Completed and saved.'
 
-    print 'Storing information about the event...'
 
+    print 'Storing event information in JSON and XML...'
     store_info_json(rotate, ac, rt, corrcoefs, baz, arriv_p, EBA, folder_name,
                     tag_name, station, phasv_means, phasv_stds, startev, event, 
                     net_r, net_s, chan1, chan2, chan3, chan4, sta_r, sta_s, 
                     source, loc_r, loc_s, event_source, depth, displacement,
                     event.magnitudes[0]['mag'], 0.001*baz[0], max_ebaz_xcoef)
 
-    print 'Done.'
-
-    print('Storing xml...')
-
     store_info_xml(folder_name,tag_name)
 
-    print('Done')
-
+    print 'Completed and saved.'
 
 if __name__ == '__main__':
 
@@ -2225,16 +2206,16 @@ if __name__ == '__main__':
         fetch event data from GCMT catalog or get it from a link (for plotting\
         beachballs)(default: neries, otherwise: link)', type=str,
                         default='neries')
-    parser.add_argument('--filter', help='Choice of filtering: \
-        If True, small Mw events at high distances are filtered out according \
-        to logarithmic filter function)(default: False, otherwise: True)',
-                        type=str, default='False')
     parser.add_argument('--check_files', help='Erase event folders if complete \
         processing failed, e.g. due to unavailable data \
         (default: False, otherwise: True)',type=str, default='False')
     parser.add_argument('--polarity', help='Flip polarity of rotation data to \
         fix dat errors, to be used in specific time windows of catalog rerun \
         (default: normal, otherwise: reverse)',type=str, default='normal')
+    parser.add_argument('--instrument', help='Choose instrument if using WET,\
+        GPS went down for a specific time window so WETR can be used in turn,\
+        though data is lower quality than WET\
+        (default: sts2, otherwise: lennartz)',type=str, default='sts2')
     parser.add_argument('--min_magnitude', help='Minimum magnitude for \
         events (default is 3).', type=float or int, default=4.0)
     parser.add_argument('--max_magnitude', help='Maximum magnitude for \
@@ -2264,9 +2245,9 @@ if __name__ == '__main__':
     args = parser.parse_args()
     station = args.station
     mode = args.mode
-    filter_e = args.filter
     check_files = args.check_files
     polarity = args.polarity
+    instrument = args.instrument.upper()
     print 'Downloading Events...'
 
     # This link leads to the quakeml webpage of a certain event on IRIS.
@@ -2301,7 +2282,8 @@ if __name__ == '__main__':
         if UTCDateTime(args.min_datetime) < UTCDateTime(2014,1,1):
             cat_all = read_events('NDK_events_before2014.ndk')
         else:
-            cat_all = read_events('http://www.ldeo.columbia.edu/~gcmt/projects/CMT/catalog/NEW_QUICK/qcmt.ndk')
+            cat_all = read_events('http://www.ldeo.columbia.edu/~gcmt/projects/'
+                                            'CMT/catalog/NEW_QUICK/qcmt.ndk')
 
         cat = cat_all.filter('time > '+str(args.min_datetime), 
                             'time < '+str(args.max_datetime),
@@ -2356,16 +2338,16 @@ if __name__ == '__main__':
                 event.write(folder_name + full_tag + '.xml', format="QUAKEML")
                 if check_files==False:
                     try:
-                        plotWaveformComp(event, station, link, mode, filter_e,
-                                         event_source)
+                        plotWaveformComp(event, station, link, mode,
+                                                                event_source)
                         contador2 += 1
                     except Exception as e:
                         contador3 += 1
                         print e
                 else:
                     try:
-                        plotWaveformComp(event, station, link, mode, filter_e,
-                                         event_source)
+                        plotWaveformComp(event, station, link, mode,
+                                                                event_source)
                         contador2 += 1
                     except Exception as e:
                         contador3 += 1
