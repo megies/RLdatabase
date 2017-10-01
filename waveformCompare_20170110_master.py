@@ -65,6 +65,7 @@ in the subplot 3 on page 3.
 
 """
 import os
+import sys
 import json
 import obspy
 import shutil
@@ -95,6 +96,9 @@ from obspy.geodetics.base import gps2dist_azimuth, locations2degrees
 #     raise ValueError('I need Matplotlib version 1.0 or newer.')
 
 class RotationalProcessingException(Exception):
+    """
+    Exception for when no data can be found for an event
+    """
     pass
 
 def data_from_file(net, sta, loc, chan, starttime, endtime):
@@ -170,14 +174,14 @@ def download_data(origin_time, net, sta, loc, chan, source):
     #                          starttime=origin_time-190,
     #                          endtime=origin_time+3*3600+10)
     try:
-        print "trying to use fdsn client service..."
+        print "Fetching data from FDSN client service..."
         c = fdsnClient(source)
         st = c.get_waveforms(network=net, station=sta, location='', 
                             channel=chan, starttime=origin_time-190,
                             endtime=origin_time+3*3600+10)
 
     except:
-        print "failed, trying to fetch data from file..."        
+        print "\tFailed, fetching data from file..."        
         dataDir_get = '/bay200/mseed_online/archive/'
         fileName = ".".join((net, sta, "." + chan + ".D",
                              origin_time.strftime("%Y.%j")))
@@ -188,7 +192,6 @@ def download_data(origin_time, net, sta, loc, chan, source):
                              o_time2.strftime("%Y.%j")))
         filePath2 = os.path.join(dataDir_get, o_time2.strftime("%Y"),
                                 net, sta, chan + '.D', fileName2)
-        print(o_time2)
         if os.path.isfile(filePath):
             if origin_time.hour > 21:
                 st = Stream()
@@ -203,15 +206,16 @@ def download_data(origin_time, net, sta, loc, chan, source):
                 st = read(filePath, starttime = origin_time - 180,
                       endtime = origin_time + 3 * 3600)
         else:
-            print "cannot find the following file: \n %s \n" % filePath
+            st = None
+            print "\tFile not found: \n\t %s \n" % filePath
 
         if not st:
             raise RotationalProcessingException('Data not available for this'
-                                                ' event...')
+                                                                    ' event...')
     st.trim(starttime=origin_time-180, endtime=origin_time+3*3600)
 
-    print 'Download of', st[0].stats.station, st[0].stats.channel, \
-                                                            'data successful!'
+    print '\tDownload of', st[0].stats.station, st[0].stats.channel, \
+                                                            'data successful.'
     return st
 
 
@@ -2248,7 +2252,7 @@ if __name__ == '__main__':
     check_files = args.check_files
     polarity = args.polarity
     instrument = args.instrument.upper()
-    print 'Downloading Events...'
+    print '\nDownloading Events...'
 
     # This link leads to the quakeml webpage of a certain event on IRIS.
     # The fetched xml provides a moment tensor data for the beachballs.
@@ -2296,20 +2300,21 @@ if __name__ == '__main__':
                              'latitude >= '+str(args.min_latitude), 
                              'latitude <= '+str(args.max_latitude))
 
-    print 'Downloaded %i events. Starting processing...' % len(cat)
 
-    output_path = '/OUTPUT/'
+    # set file output path
+    output_path = './OUTPUT/'
     if not os.path.exists(output_path): 
         os.makedirs(output_path)
 
-    contador1 = 0
-    contador2 = 0
-    contador3 = 0
+    print 'Downloaded %i events. Beginning processing...' % len(cat)
+    contador1 = contador2 = contador3 = 0
     for event in cat:
-        print '----------------------------------------------------------------'
-        print str(event).split('\n')[0]
-        print event.preferred_origin().time
-        print '----------------------------------------------------------------'
+
+        # print event divider
+        event_information = str(event).split('\n')[0]
+        print '_'*79+'\n'
+        print event_information
+        print '_'*79
         try:
             # create tags for standard filenaming
             mag_tag = str(event.magnitudes[0]['mag'])
@@ -2330,16 +2335,16 @@ if __name__ == '__main__':
             folder_name = os.path.join(output_path,tag_name) + '/'
 
             if os.path.exists(str(folder_name)):
-                print 'This event was already processed...'
+                print 'This event was already processed...\n'
                 contador1 += 1
 
             elif not os.path.exists(str(folder_name)):  # mk event directory 
                 os.makedirs(str(folder_name))
-                event.write(folder_name + full_tag + '.xml', format="QUAKEML")
+                event.write(folder_name + tag_name + '.xml', format="QUAKEML")
                 if check_files==False:
                     try:
-                        plotWaveformComp(event, station, link, mode,
-                                                                event_source)
+                        plotWaveformComp(event, station, link, mode, 
+                                            event_source, folder_name, tag_name)
                         contador2 += 1
                     except Exception as e:
                         contador3 += 1
@@ -2347,20 +2352,21 @@ if __name__ == '__main__':
                 else:
                     try:
                         plotWaveformComp(event, station, link, mode,
-                                                                event_source)
+                                            event_source, folder_name, tag_name)
                         contador2 += 1
                     except Exception as e:
                         contador3 += 1
                         print e
-                        print 'Remove incomplete folder ...'
+                        print 'Removing incomplete folder...\n'
                         shutil.rmtree(folder_name)
                         
         except IndexError:
             print 'No Magnitude picked for this Event'
 
-    print 'Done, no more events to show.'
+    print '_'*79+'\n'
+    print 'Catalog complete, no more events to show.'
     print 'From a total of %i event(s):\n %i was/were successfully processed.' \
-          '\n %i could not be processed. \n %i already processed.' % (len(cat), 
+          '\n %i could not be processed. \n %i already processed.\n'% (len(cat), 
                                                 contador2, contador3, contador1)
 
 ### DEBUGGER
