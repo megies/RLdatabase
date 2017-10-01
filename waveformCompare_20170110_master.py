@@ -25,8 +25,8 @@ coefficient), signal-to-noise ratio, backazimuths.
 
 INFORMATION: This script can be used to generate the figures for the website.
 Concerning dispersion curves there are different updated versions, that include
-more frequency bands and improved filtering. The problem is that automated velocity
-picking does not work very well. Therefore:
+more frequency bands and improved filtering. The problem is that automated 
+velocity picking does not work very well. Therefore:
 
 + Choose the built in velocity picker to pick phase velocities for single events 
 by hand. Set: --mode velocity_picker
@@ -50,21 +50,13 @@ in the subplot 3 on page 3.
 
 + P-coda windows (sec_p) now shorter for local and close events (2s).
 
-+ saves peak displacement!
-
-+ saves peak displacement and rotation rate in 18-22s band!
-
 + creates a new xml file containing most of the parameters of the json-file
 
 + 28.09.17 - To-change log: 
     -Get_corrcoeffs: clean up the cross correlation for loops
     -backas_analysis: using wrong sampling rates?
-    -ps_arrival_times: list comprehension will clean that up
-    -phas_vel: has the same call twice (ind and not ind)
-                numpy mean of empty slice throwing runtime warning
-    -clean up the store json file, filtering shouldnt be happening in there
-    -fix formatting in main
-    -change tag names to remove colons
+    -phas_vel: numpy mean of empty slice throwing runtime warning
+    -filter_and_rotate: can compress the different filter bands into a few lines
 """
 import os
 import json
@@ -220,7 +212,7 @@ def download_data(origin_time, net, sta, loc, chan, source):
     return st
 
 
-def event_info_data(event, station, mode):
+def event_info_data(event, station, mode, polarity):
 
     """
     It extracts information from the event and generates variables containing
@@ -259,10 +251,8 @@ def event_info_data(event, station, mode):
     latter = origin.latitude
     lonter = origin.longitude
     startev = origin.time
-    if station == 'WET' and mode == 'link':
-        depth = origin.depth * 0.001  # Depth in km
-    else:
-        depth = origin.depth * 0.001  # Depth in km
+    depth = origin.depth * 0.001  # Depth in km
+
     if station == 'WET':
         source = 'http://erde.geophysik.uni-muenchen.de' # if ! erde , try 'BGR'
         net_r = 'BW'
@@ -278,10 +268,12 @@ def event_info_data(event, station, mode):
         chan2 = 'BHE'
         chan3 = 'BHN'
         chan4 = 'BHZ'
+
         # ringlaser signal
         rt = download_data(startev, net_r, sta_r, loc_r, chan1, source)
-        #r t[0].data = rt[0].data * (-1) 
-        # apply only for periods of flipped data due to instrument errors
+        if polarity.lower() == 'reverse':
+            rt[0].data *= -1
+
         # broadband station signal
         acE = download_data(startev, net_s, sta_s, loc_s, chan2, source)
         acN = download_data(startev,  net_s, sta_s, loc_s, chan3, source)
@@ -294,7 +286,7 @@ def event_info_data(event, station, mode):
             ca.stats['starttime'] = startev - 180
             ca.stats['sampling_rate'] = 20.
 
-    else:
+    elif station == 'PFO':
         net_r = 'BW'
         net_s = 'I*'
         sta_r = 'PFORL'
@@ -711,6 +703,7 @@ def filter_and_rotate(ac, rt, baz, rt_pcoda, ac_pcoda, cutoff, cutoff_pc,
     pcoda_rotate = rotate_ne_rt(ac_pcoda.select(component=compN)[0].data,
                                 ac_pcoda.select(component=compE)[0].data,
                                 baz[2])
+
     # for each frequency band we need a separate rt and rotate:
     rt_band1 = rt1.filter('bandpass', freqmin=0.01, freqmax=0.02,
                           corners=3, zerophase=True)
@@ -718,6 +711,7 @@ def filter_and_rotate(ac, rt, baz, rt_pcoda, ac_pcoda, cutoff, cutoff_pc,
                                corners=3, zerophase=True)
     rotate_band1 = rotate_ne_rt(ac_band1.select(component=compN)[
         0].data, ac_band1.select(component=compE)[0].data, baz[2])
+
     rt_band2 = rt2.filter('bandpass', freqmin=0.02, freqmax=0.04,
                           corners=3, zerophase=True)
     ac_band2 = ac_band2.filter('bandpass', freqmin=0.02, freqmax=0.04,
@@ -799,37 +793,23 @@ def ps_arrival_times(distance, depth, init_sec):
     TauPy_model = TauPyModel('iasp91')
     tt = TauPy_model.get_travel_times(
         distance_in_degree=0.001 * distance / 111.11, source_depth_in_km=depth)
-    tiemp = []
-    tiems = []
+    tiemp,tiems = [],[]
+    
     # from all possible P arrivals select the earliest one
+    pwave_list = ['P','p','Pdiff','PKiKP','PKIKP','PP','Pb','Pn','Pg']
     for i2 in xrange(0, len(tt)):
-        if tt.__getitem__(i2).__dict__['name'] == 'P' or\
-            tt.__getitem__(i2).__dict__['name'] == 'p' or\
-            tt.__getitem__(i2).__dict__['name'] =='Pdiff' or\
-            tt.__getitem__(i2).__dict__['name'] == 'PKiKP' or\
-            tt.__getitem__(i2).__dict__['name'] == 'PKIKP' or\
-            tt.__getitem__(i2).__dict__['name'] == 'PP' or\
-            tt.__getitem__(i2).__dict__['name'] == 'Pb' or\
-            tt.__getitem__(i2).__dict__['name'] == 'Pn' or\
-            tt.__getitem__(i2).__dict__['name'] == 'Pg':
-                    tiem_p = tt.__getitem__(i2).__dict__['time']
-                    tiemp.append(tiem_p)
+        if tt.__getitem__(i2).__dict__['name'] in pwave_list:
+            tiem_p = tt.__getitem__(i2).__dict__['time']
+            tiemp.append(tiem_p)
 
     arriv_p = np.floor(init_sec + min(tiemp))
 
     # from all possible S arrivals select the earliest one
+    swave_list = ['S','s','Sdiff','SKiKS','SKIKS','SS','Sb','Sn','Sg']
     for i3 in xrange(0, len(tt)):
-        if tt.__getitem__(i3).__dict__['name'] == 'S' or\
-            tt.__getitem__(i3).__dict__['name'] == 's' or\
-            tt.__getitem__(i3).__dict__['name'] == 'Sdiff' or\
-            tt.__getitem__(i3).__dict__['name'] == 'SKiKS' or\
-            tt.__getitem__(i3).__dict__['name'] == 'SKIKS' or\
-            tt.__getitem__(i3).__dict__['name'] == 'SS' or\
-            tt.__getitem__(i3).__dict__['name'] == 'Sb' or\
-            tt.__getitem__(i3).__dict__['name'] == 'Sn' or\
-            tt.__getitem__(i3).__dict__['name'] == 'Sg':
-                    tiem_s = tt.__getitem__(i3).__dict__['time']
-                    tiems.append(tiem_s)
+        if tt.__getitem__(i3).__dict__['name'] in swave_list:
+            tiem_s = tt.__getitem__(i3).__dict__['time']
+            tiems.append(tiem_s)
 
     arriv_s = np.floor(init_sec + min(tiems))
 
@@ -1020,6 +1000,7 @@ def backas_analysis(rotra, rodat, acstr, sec, corrcoefs, ind, station):
     """
     compE, compN = station_components(station)
     rotra_SR = int(rotra.stats.sampling_rate)
+    compN_SR = int(acstr.select(component=compN)[0].stats.sampling_rate)
 
     step = 10
     backas = np.linspace(0, 360 - step, 360 / step)
@@ -1031,7 +1012,7 @@ def backas_analysis(rotra, rodat, acstr, sec, corrcoefs, ind, station):
                                           data[0:ind], 
                                           acstr.select(component=compE)[0].
                                           data[0:ind], backas[i6])[1]
-                            [rotra_SR * sec * i7:rotra_SR * sec * (i7 + 1)],0)
+                            [compN_SR * sec * i7:compN_SR * sec * (i7 + 1)],0)
             corrbaz.append(corrbazz[1])
     corrbaz = np.asarray(corrbaz)
     corrbaz = corrbaz.reshape(len(backas), len(corrcoefs))
@@ -1110,8 +1091,7 @@ def backas_est(rt, ac, min_sw, max_lwf, station):
     return corrsum, backas2, max_ebaz_xcoef, best_ebaz
 
 
-def phase_vel(rt, sec, corrcoefs, rotate, corrsum, backas2, ind_band,
-              ind_surf):
+def phase_vel(rt, sec, corrcoefs, rotate, corrsum, backas2, ind_band, ind_surf):
 
     """
     Calculates the phase velocities and the estimated backazimuth.
@@ -1139,29 +1119,21 @@ def phase_vel(rt, sec, corrcoefs, rotate, corrsum, backas2, ind_band,
     rt_SR = int(rt[0].stats.sampling_rate)
 
     phasv = []
-    if not ind_band:  # not dealing with frequency bands
-        for i8 in xrange(0, len(corrcoefs)):
-            if corrcoefs[i8] >= 0.75:
-                # Velocity in km/s
-                phas_v = .001 * 0.5 * max(rotate[1][rt_SR * sec * i8:rt_SR * sec
-                                         * (i8 + 1)]) / max(rt[0].data[
-                                    rt_SR * sec * i8:rt_SR * sec * (i8 + 1)])
-            else:
-                phas_v = np.NaN
-            phasv.append(phas_v)
-        phasv = np.asarray(phasv)  # Velocity in km/s
+    if ind_band:  # not dealing with frequency bands
+        start_range = ind_surf
+    elif not ind_band:
+        start_range = 0
 
-    if ind_band:  # dealing with frequency bands
-        for i8 in xrange(ind_surf, len(corrcoefs)):
-            if corrcoefs[i8] >= 0.75:
-                # Velocity in km/s
-                phas_v = .001 * 0.5 * max(rotate[1][rt_SR * sec * i8:rt_SR *sec 
-                                        * (i8 + 1)]) / max(rt[0].data[
-                                    rt_SR * sec * i8:rt_SR * sec * (i8 + 1)])
-            else:
-                phas_v = np.NaN
-            phasv.append(phas_v)
-        phasv = np.asarray(phasv)  # Velocity in km/s
+    for i8 in xrange(start_range, len(corrcoefs)):
+        if corrcoefs[i8] >= 0.75:
+            # Velocity in km/s
+            phas_v = .001 * 0.5 * max(rotate[1][rt_SR * sec * i8:rt_SR * sec
+                                     * (i8 + 1)]) / max(rt[0].data[
+                                rt_SR * sec * i8:rt_SR * sec * (i8 + 1)])
+        else:
+            phas_v = np.NaN
+        phasv.append(phas_v)
+    phasv = np.asarray(phasv)  # Velocity in km/s
 
     if max(np.asarray(corrsum)) == 0.0:
         EBA = np.nan
@@ -1196,13 +1168,14 @@ def sn_ratio(full_signal, p_arrival, sam_rate):
     tr_noise = abs(np.mean(full_signal[sam_rate * (p_arrival - 180): sam_rate
                    * (p_arrival - 100)]))
     SNR = tr_sign/tr_noise
+
     return SNR
 
 
-def store_info_json(rotate, ac, rt, corrcoefs, baz, arriv_p, EBA, tag_name,
-                    station, phasv_means, phasv_stds, startev, event, net_r,
-                    net_s, chan1, chan2, chan3, chan4, sta_r, sta_s, source,
-                    loc_r, loc_s, event_source, depth, displ, magnitude, 
+def store_info_json(rotate, ac, rt, corrcoefs, baz, arriv_p, EBA, folder_name,
+                    tag_name, station, phasv_means, phasv_stds, startev, event, 
+                    net_r, net_s, chan1, chan2, chan3, chan4, sta_r, sta_s, 
+                    source, loc_r, loc_s, event_source, depth, displ, magnitude, 
                     distance, max_ebaz_xcoef):
 
     """
@@ -1226,59 +1199,23 @@ def store_info_json(rotate, ac, rt, corrcoefs, baz, arriv_p, EBA, tag_name,
     :param arriv_p: Arrival time of the first P-wave.
     :type EBA: float
     :param EBA: Estimated backazimuth.
+    :type folder_name: string
+    :param folder_name: Name of the folder containing the event.
     :type tag_name: string
-    :param tag_name: Name of the .json file.
+    :param tag_name: Handle of the event.
     :type station: str
     :param station: Station from which data are fetched ('WET' or 'PFO').
     """
     compE, compN = station_components(station)
     mxpt = np.argmax(rt[0].data, axis=0)
-    listn = []
-    for val in range(mxpt, mxpt + 100):
-        if (rt[0].data[val] > 0):
-            listn.append(val)
-        else:
-            break
-    for val2 in range(mxpt + len(listn), mxpt + len(listn) + 100):
-        if (rt[0].data[val2] < 0):
-            listn.append(val2)
-        else:
-            break
-    mnpt = np.argmin(rt[0].data[mxpt:mxpt + len(listn)])
-    sampl_rate = rt[0].stats.sampling_rate
-    F_peak = sampl_rate / (2. * mnpt)  # Rotation frequency at peak rotation
-    # measured from point of max rotation rate to the next minimum (1/2 period)
-    # that's why there is a factor 2
-    dis_18_22s =  displ.copy()
-    dis_18_22s.filter('bandpass', freqmin=0.0454545, freqmax=0.055556, 
-                                                    corners=4, zerophase=True)
-    dis_18_22s.taper(max_percentage=0.05)
-    dis_18_22s_rot = rotate_ne_rt(
-                            dis_18_22s.select(component=compN)[0].data, 
-                            dis_18_22s.select(component=compE)[0].data, baz[2])
-
-    displ_rot = rotate_ne_rt(displ.select(component=compN)[
-                          0].data, displ.select(component=compE)[0].data, baz[2])
-    rt_18_22s  = rt.copy()
-    rt_18_22s.filter('bandpass', freqmin=0.0454545, freqmax=0.055556, 
-                                                    corners=4, zerophase=True)
-    rt_18_22s.taper(max_percentage=0.05)
-    PDIS_18_22 = max(dis_18_22s_rot[1])
-    PRZ_18_22  = max(rt_18_22s[0])
-    PDIS = max(displ_rot[1])
+   
     PAT = max(rotate[1])  # Peak transverse acceleration [nm/s]
-    PAZ = max(ac.select(component='Z')
-              [0].data)  # Peak vertical acceleration [nm/s]
     PRZ = max(rt[0].data)  # Peak vertical rotation rate [nrad/s]
     PCC = max(corrcoefs)  # Peak correlation coefficient
     TBA = baz[2]  # Theoretical backazimuth [°]
     SNT = sn_ratio(rotate[1], arriv_p, ac.select(component=compN)[
                    0].stats.sampling_rate)  # SNR for transverse acceleration
-    SNZ = sn_ratio(ac.select(component='Z')[0].data, arriv_p, ac.select(
-        component='Z')[0].stats.sampling_rate)  # SNR for vertical acc.
-    SNR = sn_ratio(rt[0].data, arriv_p, rt[0].stats.sampling_rate)
-    # Signal to noise ratio for vertical rotation rate
-#    from IPython.core.debugger import Tracer; Tracer(colors="Linux")()
+    SNR = sn_ratio(rt[0].data, arriv_p, rt[0].stats.sampling_rate) # SNR for RR
     dic = OrderedDict([
             ('data', OrderedDict([
                 ('rotational', OrderedDict([
@@ -1309,26 +1246,17 @@ def store_info_json(rotate, ac, rt, corrcoefs, baz, arriv_p, EBA, tag_name,
             ('depth_unit', 'km'),
             ('epicentral_distance', distance),
             ('epicentral_distance_unit', 'km'),
-            ('peak_transverse_acceleration', PAT),
-            ('peak_transverse_acceleration_unit', 'nm/s^2'),
-            ('peak_transverse_displacement', PDIS),
-            ('peak_transverse_displacement_at_18-22s_period', PDIS_18_22),
-            ('peak_transverse_displacement_unit', 'nm'),
             ('theoretical_backazimuth', TBA),
             ('theoretical_backazimuth_unit', 'degree'),
             ('estimated_backazimuth', EBA),
             ('estimated_backazimuth_unit', 'degree'),
             ('max_xcoef_for_estimated_backazimuth', max_ebaz_xcoef),
-            ('frequency_at_peak_vertical_rotation_rate', F_peak),
-            ('frequency_at_peak_vertical_rotation_rate_unit', 'Hz'),
-            ('peak_vertical_acceleration', PAZ),
-            ('peak_vertical_acceleration_unit', 'nm/s^2'),
             ('peak_vertical_rotation_rate', PRZ),
-            ('peak_vertical_rotation_rate_at_18-22s_period', PRZ_18_22),
             ('peak_vertical_rotation_rate_unit', 'nrad/s'),
+            ('peak_transverse_acceleration', PAT),
+            ('peak_transverse_acceleration_unit', 'nm/s^2'),
             ('peak_correlation_coefficient', PCC),
             ('transverse_acceleration_SNR', SNT),
-            ('vertical_acceleration_SNR', SNZ),
             ('vertical_rotation_rate_SNR', SNR),
             ('phase_velocity', OrderedDict([
                 ('band_1', OrderedDict([
@@ -1389,32 +1317,38 @@ def store_info_json(rotate, ac, rt, corrcoefs, baz, arriv_p, EBA, tag_name,
                     ('vel_unit', 'km/s')]))
                 ]))
             ])
-    outfile = open(tag_name + '/' + tag_name[23:] + '.json', 'wt')
+    outfile = open(folder_name + tag_name + '.json', 'wt')
     json.dump(dic, outfile, indent=4)
 
     outfile.close()
 
-def parse_json(filename,parameter1,parameter2,parameter3,parameter4,parameter5,
-                                parameter6,parameter7,parameter8,parameter9):
-    with open(filename) as data_file:
+
+def store_info_xml(folder_name,tag_name):
+
+    """
+    Store extra parameters in the xml file under the namespace rotational
+    seismology. Parameters used for filtering events on the JANE database
+    framework. Takes parameters from the .json file *(kind of hacky don't ya 
+    think, theres a better way than reading in something just created)
+
+    :type folder_name: string
+    :param folder_name: Name of the folder containing the event.
+    :type tag_name: string
+    :param tag_name: Handle of the event.
+    """
+    filename_json = folder_name + tag_name + '.json'
+    filename_xml = folder_name + tag_name + '.xml'
+
+
+    with open(filename_json) as data_file:
         data = json.load(data_file)
 
-    return data[parameter1], data[parameter2], data[parameter3],\
-            data[parameter4],data[parameter5], data[parameter6],\
-            data[parameter7],data[parameter8],data[parameter9]
-
-
-def store_info_xml(tag_name):
-    filename_json = tag_name + '/' + tag_name[23:] + '.json'
-    filename_xml = tag_name + '/' + tag_name[23:] + '.xml'
-
-    d,pcc,tSNR,rSNR,tba,eba,peak_tra,freq,p_rot = parse_json(
-        filename_json,'epicentral_distance','peak_correlation_coefficient',
-        'transverse_acceleration_SNR','vertical_rotation_rate_SNR',
-        'theoretical_backazimuth','estimated_backazimuth',
-        'peak_transverse_acceleration', 
-        'frequency_at_peak_vertical_rotation_rate', 
-        'peak_vertical_rotation_rate')
+    rotational_parameters = ['epicentral_distance',
+                            'theoretical_backazimuth',
+                            'peak_correlation_coefficient']
+    RP_list = []                       
+    for RP in rotational_parameters:
+        RP_list.append(data[RP])
 
     ns = 'http://www.rotational-seismology.org'
 
@@ -1424,57 +1358,30 @@ def store_info_xml(tag_name):
 
     params.value.epicentral_distance = AttribDict()
     params.value.epicentral_distance.namespace = ns
-    params.value.epicentral_distance.value = d
+    params.value.epicentral_distance.value = RP[0]
     params.value.epicentral_distance.attrib = {'unit':"km"}
-
-    params.value.transverse_acceleration_SNR= AttribDict()
-    params.value.transverse_acceleration_SNR.namespace = ns
-    params.value.transverse_acceleration_SNR.value = tSNR
-
-    params.value.vertical_rotation_rate_SNR = AttribDict()
-    params.value.vertical_rotation_rate_SNR.namespace = ns
-    params.value.vertical_rotation_rate_SNR.value = rSNR
 
     params.value.theoretical_backazimuth = AttribDict()
     params.value.theoretical_backazimuth.namespace = ns
-    params.value.theoretical_backazimuth.value = tba
+    params.value.theoretical_backazimuth.value = RP[1]
     params.value.theoretical_backazimuth.attrib = {'unit':"degree"}
-
-    params.value.estimated_backazimuth = AttribDict()
-    params.value.estimated_backazimuth.namespace = ns
-    params.value.estimated_backazimuth.value = eba
-    params.value.estimated_backazimuth.attrib = {'unit':"degree"}
-
-    params.value.peak_transverse_acceleration = AttribDict()
-    params.value.peak_transverse_acceleration.namespace = ns
-    params.value.peak_transverse_acceleration.value = peak_tra
-    params.value.peak_transverse_acceleration.attrib = {'unit':"nm/s^2"}
-
-    params.value.frequency_at_peak_rotation = AttribDict()
-    params.value.frequency_at_peak_rotation.namespace = ns
-    params.value.frequency_at_peak_rotation.value = freq
-    params.value.frequency_at_peak_rotation.attrib = {'unit':"Hz"}
-
-    params.value.peak_vertical_rotation_rate = AttribDict()
-    params.value.peak_vertical_rotation_rate.namespace = ns
-    params.value.peak_vertical_rotation_rate.value = p_rot
-    params.value.peak_vertical_rotation_rate.attrib = {'unit':"nrad/s"}
 
     params.value.peak_correlation_coefficient = AttribDict()
     params.value.peak_correlation_coefficient.namespace = ns
-    params.value.peak_correlation_coefficient.value = pcc
+    params.value.peak_correlation_coefficient.value = RP[2]
 
     cat = read_events(pathname_or_url=filename_xml, format='QUAKEML')
 
     cat[0].extra = AttribDict()
     for name, item in params.value.items():
         cat[0].extra[name] = item
-    cat.write(filename_xml, "QUAKEML",
-        nsmap={"rotational_seismology_database": 
-                            r"http://www.rotational-seismology.org"})
+
+    cat.write(filename_xml, "QUAKEML",nsmap={"rotational_seismology_database": 
+                                    r"http://www.rotational-seismology.org"})
 
 
-def plotWaveformComp(event, station, link, mode, filter_e, event_source):
+def plotWaveformComp(event, station, link, mode, filter_e, event_source, 
+                                            folder_name, tag_name):
 
     """
     Compares vertical rotation rate and transversal acceleration through
@@ -1495,21 +1402,10 @@ def plotWaveformComp(event, station, link, mode, filter_e, event_source):
         or an IRIS link ('link').
     """
 
-    tag_name = os.path.join('database/static/OUTPUT', catalog + '_' + 
-                            str(event.origins[0]['time'].date) + 'T' + 
-                            str(event.origins[0]['time'].hour) + ':' + 
-                            str(event.origins[0]['time'].minute) + '_' + 
-                            str(event.magnitudes[0]['mag']) + '_' + 
-                            str(event.event_descriptions[0]['text'].splitlines(
-                                    )[0].replace(' ', '_').replace(',', '_')))
-    tag_name2 = os.path.join('database/static/OUTPUT/Phase_velocities', 
-                            str(event).splitlines()[0].replace('\t', '')
-                             .replace(' ', '_').replace('|', '_')
-                             .replace(':', '_'))
     # event information:
     latter, lonter, depth, startev, rt, ac, baz, gcdist, net_r, net_s, chan1,\
         chan2, chan3, chan4, sta_r, sta_s, loc_r, loc_s, source =\
-        event_info_data(event, station, mode)
+        event_info_data(event, station, mode, polarity)
     try:
         region = event.event_descriptions[0]['text']
         reg=True
@@ -1525,7 +1421,7 @@ def plotWaveformComp(event, station, link, mode, filter_e, event_source):
         if Mag > Mw:
             print 'The event does probably not allow for velocity estimates as'\
                 'distance is too large or magnitude too small'
-            os.rmdir(tag_name)
+            os.rmdir(folder_name)
             return
     
     MomentTensor, Magnitude, Region = Get_MomentTensor_Magnitude(link)
@@ -1790,7 +1686,7 @@ def plotWaveformComp(event, station, link, mode, filter_e, event_source):
         ax.axis('off')
 
     print 'Done.'
-    plt.savefig(tag_name + '/' + tag_name[23:] + '_page_1.png')
+    plt.savefig(folder_name + tag_name + '_page_1.png')
     plt.close()
 
     # Preprocesing of rotational and translational signal
@@ -1992,7 +1888,7 @@ def plotWaveformComp(event, station, link, mode, filter_e, event_source):
               % (cutoff))
     plt.grid(True)
     print 'Done.'
-    plt.savefig(tag_name + '/' + tag_name[23:] + '_page_2.png')
+    plt.savefig(folder_name + tag_name + '_page_2.png')
     plt.close()
 
     # Cross-correlation analysis
@@ -2105,7 +2001,7 @@ def plotWaveformComp(event, station, link, mode, filter_e, event_source):
     arr[l1+l2+l3+l4+l5+l6:l1+l2+l3+l4+l5+l6+l7, 1] = [1./0.5]*len(phasv_band7)
     arr[l1+l2+l3+l4+l5+l6+l7:l1+l2+l3+l4+l5+l6+l7+l8, 1] =\
         [1./0.8]*len(phasv_band8)
-    np.save(tag_name2, arr)
+
     phasv_means = []
     phasv_stds = []
     for ksk in [phasv_band1, phasv_band2, phasv_band3, phasv_band4,
@@ -2186,7 +2082,7 @@ def plotWaveformComp(event, station, link, mode, filter_e, event_source):
     cb1.set_label(ur'X-corr. coeff.', fontweight='bold')
     cb1.set_ticks([-1.0,-0.75,-0.5,-0.25,0.0,0.25,0.5,0.75,1.0])
     print 'Done.'
-    plt.savefig(tag_name + '/' + tag_name[23:] + '_page_3.png')
+    plt.savefig(folder_name + tag_name + '_page_3.png')
     plt.close()
 
     print 'Analyzing rotations in the P-coda...'
@@ -2298,24 +2194,25 @@ def plotWaveformComp(event, station, link, mode, filter_e, event_source):
     cb1.set_ticks([-1.0,-0.75,-0.5,-0.25,0.0,0.25,0.5,0.75,1.0])
     print 'Done.'
     print 'Saving figures...'
-    plt.savefig(tag_name + '/' + tag_name[23:] + '_page_4.png')
+    plt.savefig(folder_name + tag_name + '_page_4.png')
     plt.close()
 
     print 'Storing information about the event...'
 
-    store_info_json(rotate, ac, rt, corrcoefs, baz, arriv_p, EBA, tag_name,
-                    station, phasv_means, phasv_stds, startev, event, net_r,
-                    net_s, chan1, chan2, chan3, chan4, sta_r, sta_s, source,
-                    loc_r, loc_s, event_source, depth, displacement,
+    store_info_json(rotate, ac, rt, corrcoefs, baz, arriv_p, EBA, folder_name,
+                    tag_name, station, phasv_means, phasv_stds, startev, event, 
+                    net_r, net_s, chan1, chan2, chan3, chan4, sta_r, sta_s, 
+                    source, loc_r, loc_s, event_source, depth, displacement,
                     event.magnitudes[0]['mag'], 0.001*baz[0], max_ebaz_xcoef)
 
     print 'Done.'
 
     print('Storing xml...')
 
-    store_info_xml(tag_name)
+    store_info_xml(folder_name,tag_name)
 
     print('Done')
+
 
 if __name__ == '__main__':
 
@@ -2335,6 +2232,9 @@ if __name__ == '__main__':
     parser.add_argument('--check_files', help='Erase event folders if complete \
         processing failed, e.g. due to unavailable data \
         (default: False, otherwise: True)',type=str, default='False')
+    parser.add_argument('--polarity', help='Flip polarity of rotation data to \
+        fix dat errors, to be used in specific time windows of catalog rerun \
+        (default: normal, otherwise: reverse)',type=str, default='normal')
     parser.add_argument('--min_magnitude', help='Minimum magnitude for \
         events (default is 3).', type=float or int, default=4.0)
     parser.add_argument('--max_magnitude', help='Maximum magnitude for \
@@ -2355,22 +2255,25 @@ if __name__ == '__main__':
         events (default is 180°).', type=float or int, default=180.0)
     parser.add_argument('--min_datetime', help='Earliest date and time for \
         the search. Format is UTC: yyyy-mm-dd-[T hh:mm:ss]. \
-        Example: 2010-02-27T05:00', type=str, default=str(datetime.datetime.now()-datetime.timedelta(hours=168)))
+        Example: 2010-02-27T05:00', type=str, default=str(
+                        datetime.datetime.now()-datetime.timedelta(hours=168)))
     parser.add_argument('--max_datetime', help='Latest date and time for \
-        the search (default is today).',type=str, default=str(datetime.datetime.now()))
+        the search (default is today).',type=str, default=str(
+                                                    datetime.datetime.now()))
 
     args = parser.parse_args()
     station = args.station
     mode = args.mode
     filter_e = args.filter
     check_files = args.check_files
+    polarity = args.polarity
     print 'Downloading Events...'
 
     # This link leads to the quakeml webpage of a certain event on IRIS.
     # The fetched xml provides a moment tensor data for the beachballs.
     link = 'http://www.iris.edu/spudservice/momenttensor/736631/quakeml'
-    #quakeml = '/home/jsalvermoser/waveformCompare/500kmradius_events_qml.xml'
-    quakeml = '/import/two-data/salvermoser/waveformCompare/XML-extra_events/extra_events.xml'
+    quakeml = './extra_events.xml'
+
     if station == 'WET' and mode == 'qmlfile':
         cat = read_events(quakeml, format='QUAKEML')
         event_source = "ISC_"
@@ -2381,7 +2284,8 @@ if __name__ == '__main__':
         c = fdsnClient(event_source)
         cat = c.get_events(minmagnitude=args.min_magnitude,
                            maxmagnitude=args.max_magnitude,
-                           mindepth=args.min_depth, #magnitudetype='Mw',
+                           mindepth=args.min_depth, 
+                           # magnitudetype='Mw',
                            maxdepth=args.max_depth,
                            minlatitude=args.min_latitude,
                            maxlatitude=args.max_latitude,
@@ -2390,6 +2294,7 @@ if __name__ == '__main__':
                            starttime=args.min_datetime,
                            endtime=args.max_datetime,
                            catalog=catalog)
+
     else:
         catalog='GCMT'
         event_source = "GCMT"
@@ -2398,44 +2303,57 @@ if __name__ == '__main__':
         else:
             cat_all = read_events('http://www.ldeo.columbia.edu/~gcmt/projects/CMT/catalog/NEW_QUICK/qcmt.ndk')
 
-        cat = cat_all.filter('time > '+str(args.min_datetime), 'time < '+str(args.max_datetime),
-                             'magnitude >= '+str(args.min_magnitude), 'magnitude <= '+str(args.max_magnitude),
-                             # 'depth >= '+str(args.min_depth), 'depth <= '+str(args.max_depth)
-                             'longitude >= '+str(args.min_longitude), 'longitude <= '+str(args.max_longitude),
-                             'latitude >= '+str(args.min_latitude), 'latitude <= '+str(args.max_latitude))
+        cat = cat_all.filter('time > '+str(args.min_datetime), 
+                            'time < '+str(args.max_datetime),
+                             'magnitude >= '+str(args.min_magnitude), 
+                             'magnitude <= '+str(args.max_magnitude),
+                             # 'depth >= '+str(args.min_depth), 
+                             # 'depth <= '+str(args.max_depth),
+                             'longitude >= '+str(args.min_longitude), 
+                             'longitude <= '+str(args.max_longitude),
+                             'latitude >= '+str(args.min_latitude), 
+                             'latitude <= '+str(args.max_latitude))
 
     print 'Downloaded %i events. Starting processing...' % len(cat)
 
-    if not os.path.exists('database/static/OUTPUT'): #'database/static/OUTPUT'):
-        os.makedirs('database/static/OUTPUT')#database/static/OUTPUT')
-    if not os.path.exists('database/static/OUTPUT/Phase_velocities'):# 'database_static_OUTPUT/Phase_velocities'):
-        os.makedirs('database/static/OUTPUT/Phase_velocities') #'database_static_OUTPUT/Phase_velocities')
+    output_path = '/OUTPUT/'
+    if not os.path.exists(output_path): 
+        os.makedirs(output_path)
 
     contador1 = 0
     contador2 = 0
     contador3 = 0
     for event in cat:
-        print '--------------------------------------------------------------'
+        print '----------------------------------------------------------------'
         print str(event).split('\n')[0]
-
         print event.preferred_origin().time
-        print '--------------------------------------------------------------'
+        print '----------------------------------------------------------------'
         try:
-            tag_name = os.path.join('database/static/OUTPUT', catalog + '_' + str(event.origins[0]['time'].date) + 
-                       'T' + str(event.origins[0]['time'].hour) + ':' + 
-                       str(event.origins[0]['time'].minute) +'_' + str(event.magnitudes[0]['mag']) + 
-                    '_' + str(event.event_descriptions[0]['text'].splitlines()[0].replace(' ', '_').replace(',', '_')))
+            # create tags for standard filenaming
+            mag_tag = str(event.magnitudes[0]['mag'])
 
-            if os.path.exists(str(tag_name)):
+            # Flinn Engdahl region, i.e. SOUTHEAST_OF_HONSHU_JAPAN
+            flinn_engdahl = event.event_descriptions[0]['text'].splitlines()[0]
+            substitutions = [(', ', '_'),(' ','_')]
+            for search, replace in substitutions:
+                flinn_engdahl = flinn_engdahl.replace(search,replace)
+
+            # ISO861 Time Format, i.e. '2017-09-23T125302'
+            time_tag = event.origins[0]['time'].isoformat()[:-7].replace(':','')
+
+            # i.e. 'GCMT_2017-09-23T125302_6.05_OAXACA_MEXICO'
+            tag_name = '_'.join((catalog,time_tag,mag_tag,flinn_engdahl))
+
+            # i.e. './OUTPUT/GCMT_2017-09-23T125302_6.05_OAXACA_MEXICO/
+            folder_name = os.path.join(output_path,tag_name) + '/'
+
+            if os.path.exists(str(folder_name)):
                 print 'This event was already processed...'
                 contador1 += 1
-            elif not os.path.exists(str(tag_name)):  # mk directory for each event
-                os.makedirs(str(tag_name))
-                event.write(tag_name + "/" + catalog + '_' + 
-                    str(event.origins[0]['time'].date) + 'T' + str(event.origins[0]['time'].hour) + ':' + 
-                    str(event.origins[0]['time'].minute) +'_' + str(event.magnitudes[0]['mag']) + 
-                    '_' + str(event.event_descriptions[0]['text'].splitlines()[0].replace(' ', '_').replace(',', '_')) + 
-                    ".xml", format="QUAKEML")
+
+            elif not os.path.exists(str(folder_name)):  # mk event directory 
+                os.makedirs(str(folder_name))
+                event.write(folder_name + full_tag + '.xml', format="QUAKEML")
                 if check_files==False:
                     try:
                         plotWaveformComp(event, station, link, mode, filter_e,
@@ -2453,14 +2371,15 @@ if __name__ == '__main__':
                         contador3 += 1
                         print e
                         print 'Remove incomplete folder ...'
-                        shutil.rmtree(tag_name)
+                        shutil.rmtree(folder_name)
                         
         except IndexError:
             print 'No Magnitude picked for this Event'
 
     print 'Done, no more events to show.'
     print 'From a total of %i event(s):\n %i was/were successfully processed.' \
-          '\n %i could not be processed. \n %i already processed.' % (len(cat), contador2, contador3, contador1)
+          '\n %i could not be processed. \n %i already processed.' % (len(cat), 
+                                                contador2, contador3, contador1)
 
 ### DEBUGGER
 #from IPython.core.debugger import Tracer; Tracer(colors="Linux")()
