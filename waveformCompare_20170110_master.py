@@ -2330,7 +2330,7 @@ if __name__ == '__main__':
                 flinn_engdahl = flinn_engdahl.replace(search,replace)
 
             # ISO861 Time Format, i.e. '2017-09-23T125302'
-            time_tag = event.origins[0]['time'].isoformat()[:-7].replace(':','')
+            time_tag = event.origins[0]['time'].isoformat()[:19].replace(':','')
 
             # i.e. 'GCMT_2017-09-23T125302_6.05_OAXACA_MEXICO'
             tag_name = '_'.join((catalog,time_tag,mag_tag,flinn_engdahl))
