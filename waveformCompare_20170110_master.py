@@ -2262,9 +2262,9 @@ if __name__ == '__main__':
     # This link leads to the quakeml webpage of a certain event on IRIS.
     # The fetched xml provides a moment tensor data for the beachballs.
     link = 'http://www.iris.edu/spudservice/momenttensor/736631/quakeml'
-    quakeml = './extra_events.xml'
 
     if station == 'WET' and mode == 'qmlfile':
+        quakeml = './populate_database/extra_events.xml'
         cat = read_events(quakeml, format='QUAKEML')
         event_source = "ISC_"
         catalog='ISC_'
@@ -2311,7 +2311,7 @@ if __name__ == '__main__':
     if not os.path.exists(output_path): 
         os.makedirs(output_path)
 
-    print 'Downloaded %i events. Beginning processing' % len(cat)
+    print 'Downloaded %i events. Beginning processing.' % len(cat)
     contador1 = contador2 = contador3 = 0
     bars = '='*79
     for event in cat:

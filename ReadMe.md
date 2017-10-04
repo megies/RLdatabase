@@ -3,17 +3,25 @@
 
 ## List of important files and folders:
 
-* waveformCompare (main-folder)
+  - waveformCompare_20170110_master.py (main processing script)
 
+  - OUTPUT (folder containing all processed events)
+
+  -event_upload_rotjane.py (python script for pushing quakemls to JANE 
+  and posting attachments)
+
+
+* populate_database
+
+  -populate_database.sh (shell script for rerunning the database from scratch,
+  following the composition guide)
+    
   - Catalog_composition_guide.txt (contains info of how to recalculate the whole database)
 
-  - CRONTAB_waveformCompare.txt (backup for the crontab --> put in "crontab -e" if the old one is lost, but CHECK PATHS!)
-
-  - waveformCompare_20170110_master.py (event processing -> database entries!)
-
   - XML-extra_events (contains quakeML-catalogs for ISC-picked events. Most of them are local and low magnitude)
+
+  - Other files here justify the choices made in composition guide.
 	
-  - OUTPUT (folder containing processed events)
    
 
 ## Troubleshooting/ Preparation:
