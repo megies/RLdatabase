@@ -2322,15 +2322,17 @@ if __name__ == '__main__':
 
         try:
             # create tags for standard filenaming
-            mag_tag = str(event.magnitudes[0]['mag'])
+            # magnitude, always keep at 3 characters long, fill w/ 0's if not
+            mag_tag = '{:0^4}'.format(str(event.magnitudes[0]['mag']))
 
             # Flinn Engdahl region, i.e. SOUTHEAST_OF_HONSHU_JAPAN
             substitutions = [(', ', '_'),(' ','_')]
             for search, replace in substitutions:
                 flinn_engdahl = flinn_engdahl.replace(search,replace)
 
-            # ISO861 Time Format, i.e. '2017-09-23T125302'
-            time_tag = event.origins[0]['time'].isoformat()[:19].replace(':','')
+            # ISO861 Time Format, i.e. '2017-09-23T125302Z'
+            time_tag = event.origins[0]['time'].isoformat(
+                                                )[:19].replace(':','')+'Z'
 
             # i.e. 'GCMT_2017-09-23T125302_6.05_OAXACA_MEXICO'
             tag_name = '_'.join((catalog,time_tag,mag_tag,flinn_engdahl))
