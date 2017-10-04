@@ -2313,12 +2313,11 @@ if __name__ == '__main__':
 
     print 'Downloaded %i events. Beginning processing' % len(cat)
     contador1 = contador2 = contador3 = 0
+    bars = '='*79
     for event in cat:
-
         # print event divider
         event_information = str(event).split('\n')[0][7:]
         flinn_engdahl = event.event_descriptions[0]['text']
-        bars = '_'*79
         print '{}\n{}\n{}\n{}'.format(bars,flinn_engdahl,event_information,bars)
 
         try:
@@ -2368,7 +2367,7 @@ if __name__ == '__main__':
         except IndexError:
             print 'No Magnitude picked for this Event'
 
-    print '_'*79+'\n'
+    print '{}/n'.format(bars)
     print 'Catalog complete, no more events to show.'
     print 'From a total of %i event(s):\n %i was/were successfully processed.' \
           '\n %i could not be processed. \n %i already processed.\n'% (len(cat), 
