@@ -1386,17 +1386,17 @@ def store_info_xml(folder_name,tag_name):
 
     params.value.epicentral_distance = AttribDict()
     params.value.epicentral_distance.namespace = ns
-    params.value.epicentral_distance.value = RP[0]
+    params.value.epicentral_distance.value = RP_list[0]
     params.value.epicentral_distance.attrib = {'unit':"km"}
 
     params.value.theoretical_backazimuth = AttribDict()
     params.value.theoretical_backazimuth.namespace = ns
-    params.value.theoretical_backazimuth.value = RP[1]
+    params.value.theoretical_backazimuth.value = RP_list[1]
     params.value.theoretical_backazimuth.attrib = {'unit':"degree"}
 
     params.value.peak_correlation_coefficient = AttribDict()
     params.value.peak_correlation_coefficient.namespace = ns
-    params.value.peak_correlation_coefficient.value = RP[2]
+    params.value.peak_correlation_coefficient.value = RP_list[2]
 
     cat = read_events(pathname_or_url=filename_xml, format='QUAKEML')
 
