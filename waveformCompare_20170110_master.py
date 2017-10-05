@@ -71,6 +71,7 @@ import obspy
 import shutil
 import argparse
 import datetime
+import warnings
 from collections import OrderedDict
 from urllib.request import urlopen
 from xml.dom.minidom import parseString
@@ -92,6 +93,12 @@ from obspy.signal.rotate import rotate_ne_rt
 from obspy.signal.cross_correlation import xcorr
 from obspy.core.util.attribdict import AttribDict
 from obspy.geodetics.base import gps2dist_azimuth, locations2degrees
+
+
+warnings.filterwarnings(
+    action='once', category=np.VisibleDeprecationWarning,
+    message='using a non-integer number instead of an integer will result in '
+            'an error in the future')
 
 # if matplotlib.__version__ < '1.0':  # Matplotlib 1.0 or newer is necessary
 #     raise ValueError('I need Matplotlib version 1.0 or newer.')
