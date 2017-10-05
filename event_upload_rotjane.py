@@ -14,7 +14,7 @@ import datetime
 # settings 
 root_path = 'http://127.0.0.1:8000/rest/'
 authority = ('chow','chow')
-OUTPUT_path = './'
+OUTPUT_PATH = os.path.abspath('./OUTPUT/')
 
 # command line arguments
 parser = argparse.ArgumentParser(description='Upload event quakeml and \
@@ -42,11 +42,12 @@ if timespan == 'week':
     cat = []
     for J in range(7):
         past = datetime.datetime.utcnow() - datetime.timedelta(days=J)
-        day = glob.glob(OUTPUT_path+'GCMT_{}*'.format(past.isoformat()[:10]))
+        day = glob.glob(os.path.join(OUTPUT_PATH, 'GCMT_{}*'.format(past.isoformat()[:10])))
         cat += day
 elif timespan == 'all':
     # initial population, grab all events in folder
-    cat = glob.glob(OUTPUT_path+'GCMT*/') + glob.glob(OUTPUT_PATH+'ISC*/')
+    cat = glob.glob(os.path.join(OUTPUT_PATH, 'GCMT*')) + \
+        glob.glob(os.path.join(OUTPUT_PATH, 'ISC*'))
     cat.sort(reverse=True)
     
 # ============================================================================
