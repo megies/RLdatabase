@@ -35,7 +35,7 @@ head_p3 = {'content-type': 'image/png',
 head_p4 = {'content-type': 'image/png',
                  'category': 'P-Coda Comparison'} 
 headers_json = {'content-type': 'text/json',
-                 'category': 'Processed Data'} 
+                 'category': 'Processing Results'} 
 
 if timespan == 'week':
     # look for events in the past week
