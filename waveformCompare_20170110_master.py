@@ -1372,37 +1372,39 @@ def store_info_xml(folder_name,tag_name):
         data = json.load(data_file)
 
     rotational_parameters = ['epicentral_distance',
-                            'theoretical_backazimuth',
-                            'peak_correlation_coefficient']
-    RP_list = []                       
-    for RP in rotational_parameters:
-        RP_list.append(data[RP])
+                             'theoretical_backazimuth',
+                             'peak_correlation_coefficient']
 
     ns = 'http://www.rotational-seismology.org'
 
-    params = AttribDict()
-    params.namespace = ns
-    params.value = AttribDict()
-
-    params.value.epicentral_distance = AttribDict()
-    params.value.epicentral_distance.namespace = ns
-    params.value.epicentral_distance.value = RP_list[0]
-    params.value.epicentral_distance.attrib = {'unit':"km"}
-
-    params.value.theoretical_backazimuth = AttribDict()
-    params.value.theoretical_backazimuth.namespace = ns
-    params.value.theoretical_backazimuth.value = RP_list[1]
-    params.value.theoretical_backazimuth.attrib = {'unit':"degree"}
-
-    params.value.peak_correlation_coefficient = AttribDict()
-    params.value.peak_correlation_coefficient.namespace = ns
-    params.value.peak_correlation_coefficient.value = RP_list[2]
-
     cat = read_events(pathname_or_url=filename_xml, format='QUAKEML')
-
     cat[0].extra = AttribDict()
-    for name, item in params.value.items():
-        cat[0].extra[name] = item
+
+    for station, values in data['rotational_parameters'].items():
+        RP_list = []
+        for RP in rotational_parameters:
+            RP_list.append(data[RP])
+
+        params = AttribDict()
+        params.namespace = ns
+        params.value = AttribDict()
+
+        params.value.epicentral_distance = AttribDict()
+        params.value.epicentral_distance.namespace = ns
+        params.value.epicentral_distance.value = RP_list[0]
+        params.value.epicentral_distance.attrib = {'unit':"km"}
+
+        params.value.theoretical_backazimuth = AttribDict()
+        params.value.theoretical_backazimuth.namespace = ns
+        params.value.theoretical_backazimuth.value = RP_list[1]
+        params.value.theoretical_backazimuth.attrib = {'unit':"degree"}
+
+        params.value.peak_correlation_coefficient = AttribDict()
+        params.value.peak_correlation_coefficient.namespace = ns
+        params.value.peak_correlation_coefficient.value = RP_list[2]
+        cat[0].extra['rotational_parameters_{}'.format(station)] = {
+            'namespace': ns,
+            'value': params}
 
     cat.write(filename_xml, "QUAKEML",nsmap={"rotational_seismology_database": 
                                     r"http://www.rotational-seismology.org"})
