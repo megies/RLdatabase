@@ -1244,110 +1244,165 @@ def store_info_json(rotate, ac, rt, corrcoefs, baz, arriv_p, EBA, folder_name,
     SNT = sn_ratio(rotate[1], arriv_p, ac.select(component=compN)[0].
                                         stats.sampling_rate)  # Transv. Acc SNR
     SNR = sn_ratio(rt[0].data, arriv_p, rt[0].stats.sampling_rate) # SNR for RR
-    dic = OrderedDict([
-            ('data', OrderedDict([
-                ('rotational', OrderedDict([
+    
+    # common event dictionary
+    dic_event = OrderedDict([
+            ('event_information', 
+                OrderedDict([
+                ('event_id',event.resource_id.id),
+                ('event_source',event_source),
+                ('starttime',str(startev-180)),
+                ('endtime',str(startev+3*3600))
+                ('magnitude',magnitude),
+                ('depth',depth),
+                ('depth_unit','km')
+                ])
+            )
+            ])
+
+    # individual station dictionary w/ rotational parameters
+    dic_station = OrderedDict([
+            ('station_information_{}'.format(station), 
+                OrderedDict([
+                ('station_latitude',str(rt[0].stats.coordinates['latitude'])),
+                ('station_longitude',str(rt[0].stats.coordinates['longitude'])),
+                ('rotation_station', 
+                    OrderedDict([
                     ('network', net_r),
                     ('station', sta_r),
                     ('loc', loc_r),
                     ('channel', chan1),
-                    ('arclink_data_select_source', source)])),
-                ('translational', OrderedDict([
+                    ('data source', source)
+                    ])
+                ),
+                ('translation_station', 
+                    OrderedDict([
                     ('network', net_s),
                     ('station', sta_s),
                     ('loc', loc_s),
                     ('channel_N', chan3),
                     ('channel_E', chan2),
                     ('channel_Z', chan4),
-                    ('arclink_data_select_source', source)]))
-                ])),
-            ('event_id', event.resource_id.id),
-            ('event_source', event_source),
-            ('starttime', str(startev-180)),
-            ('endtime', str(startev+3*3600)),
-            ('station_latitude', str(rt[0].stats.coordinates['latitude'])),
-            ('station_longitude', str(rt[0].stats.coordinates['longitude'])),
-            ('event_latitude', event.preferred_origin().latitude),
-            ('event_longitude', event.preferred_origin().longitude),
-            ('magnitude', magnitude),
-            ('depth', depth),
-            ('depth_unit', 'km'),
-            ('epicentral_distance', distance),
-            ('epicentral_distance_unit', 'km'),
-            ('theoretical_backazimuth', TBA),
-            ('theoretical_backazimuth_unit', 'degree'),
-            ('estimated_backazimuth', EBA),
-            ('estimated_backazimuth_unit', 'degree'),
-            ('max_xcoef_for_estimated_backazimuth', max_ebaz_xcoef),
-            ('peak_vertical_rotation_rate', PRZ),
-            ('peak_vertical_rotation_rate_unit', 'nrad/s'),
-            ('peak_transverse_acceleration', PAT),
-            ('peak_transverse_acceleration_unit', 'nm/s^2'),
-            ('peak_correlation_coefficient', PCC),
-            ('transverse_acceleration_SNR', SNT),
-            ('vertical_rotation_rate_SNR', SNR),
-            ('phase_velocity', OrderedDict([
-                ('band_1', OrderedDict([
-                    ('freqmin', 0.01),
-                    ('freqmax', 0.02),
-                    ('freq_unit', 'Hz'),
-                    ('mean_phase_vel', phasv_means[0]),
-                    ('vel_std', phasv_stds[0]),
-                    ('vel_unit', 'km/s')])),
-                ('band_2', OrderedDict([
-                    ('freqmin', 0.02),
-                    ('freqmax', 0.04),
-                    ('freq_unit', 'Hz'),
-                    ('mean_phase_vel', phasv_means[1]),
-                    ('vel_std', phasv_stds[1]),
-                    ('vel_unit', 'km/s')])),
-                ('band_3', OrderedDict([
-                    ('freqmin', 0.04),
-                    ('freqmax', 0.10),
-                    ('freq_unit', 'Hz'),
-                    ('mean_phase_vel', phasv_means[2]),
-                    ('vel_std', phasv_stds[2]),
-                    ('vel_unit', 'km/s')])),
-                ('band_4', OrderedDict([
-                    ('freqmin', 0.10),
-                    ('freqmax', 0.20),
-                    ('freq_unit', 'Hz'),
-                    ('mean_phase_vel', phasv_means[3]),
-                    ('vel_std', phasv_stds[3]),
-                    ('vel_unit', 'km/s')])),
-                ('band_5', OrderedDict([
-                    ('freqmin', 0.20),
-                    ('freqmax', 0.30),
-                    ('freq_unit', 'Hz'),
-                    ('mean_phase_vel', phasv_means[4]),
-                    ('vel_std', phasv_stds[4]),
-                    ('vel_unit', 'km/s')])),
-                ('band_6', OrderedDict([
-                    ('freqmin', 0.30),
-                    ('freqmax', 0.40),
-                    ('freq_unit', 'Hz'),
-                    ('mean_phase_vel', phasv_means[5]),
-                    ('vel_std', phasv_stds[5]),
-                    ('vel_unit', 'km/s')])),
-                ('band_7', OrderedDict([
-                    ('freqmin', 0.40),
-                    ('freqmax', 0.60),
-                    ('freq_unit', 'Hz'),
-                    ('mean_phase_vel', phasv_means[6]),
-                    ('vel_std', phasv_stds[6]),
-                    ('vel_unit', 'km/s')])),
-                ('band_8', OrderedDict([
-                    ('freqmin', 0.60),
-                    ('freqmax', 1.0),
-                    ('freq_unit', 'Hz'),
-                    ('mean_phase_vel', phasv_means[7]),
-                    ('vel_std', phasv_stds[7]),
-                    ('vel_unit', 'km/s')]))
-                ]))
-            ])
-    outfile = open(folder_name + tag_name + '.json', 'wt')
-    json.dump(dic, outfile, indent=4)
+                    ('data source', source)
+                    ])
+                ),
+                ('rotatational_parameters'.format(station),
+                    OrderedDict([
+                    ('epicentral_distance', distance),
+                    ('epicentral_distance_unit', 'km'),
+                    ('theoretical_backazimuth', TBA),
+                    ('estimated_backazimuth', EBA),
+                    ('backazimuth_unit', 'degree'),
+                    ('max_xcoef_for_estimated_backazimuth', max_ebaz_xcoef),
+                    ('peak_vertical_rotation_rate', PRZ),
+                    ('peak_vertical_rotation_rate_unit', 'nrad/s'),
+                    ('peak_transverse_acceleration', PAT),
+                    ('peak_transverse_acceleration_unit', 'nm/s^2'),
+                    ('peak_correlation_coefficient', PCC),
+                    ('vertical_rotation_rate_SNR', SNR),
+                    ('transverse_acceleration_SNR', SNT),
+                    ])
+                )
+                ('phase_velocities'.format(station), 
+                    OrderedDict([
+                    ('band_1', 
+                        OrderedDict([
+                        ('freqmin', 0.01),
+                        ('freqmax', 0.02),
+                        ('freq_unit', 'Hz'),
+                        ('mean_phase_vel', phasv_means[0]),
+                        ('vel_std', phasv_stds[0]),
+                        ('vel_unit', 'km/s')
+                        ])
+                    ),
+                    ('band_2', 
+                        OrderedDict([
+                        ('freqmin', 0.02),
+                        ('freqmax', 0.04),
+                        ('freq_unit', 'Hz'),
+                        ('mean_phase_vel', phasv_means[1]),
+                        ('vel_std', phasv_stds[1]),
+                        ('vel_unit', 'km/s')
+                        ])
+                    ),
+                    ('band_3', 
+                        OrderedDict([
+                        ('freqmin', 0.04),
+                        ('freqmax', 0.10),
+                        ('freq_unit', 'Hz'),
+                        ('mean_phase_vel', phasv_means[2]),
+                        ('vel_std', phasv_stds[2]),
+                        ('vel_unit', 'km/s')
+                        ])
+                    ),
+                    ('band_4', 
+                        OrderedDict([
+                        ('freqmin', 0.10),
+                        ('freqmax', 0.20),
+                        ('freq_unit', 'Hz'),
+                        ('mean_phase_vel', phasv_means[3]),
+                        ('vel_std', phasv_stds[3]),
+                        ('vel_unit', 'km/s')
+                        ])
+                    ),
+                    ('band_5', 
+                        OrderedDict([
+                        ('freqmin', 0.20),
+                        ('freqmax', 0.30),
+                        ('freq_unit', 'Hz'),
+                        ('mean_phase_vel', phasv_means[4]),
+                        ('vel_std', phasv_stds[4]),
+                        ('vel_unit', 'km/s')
+                        ])
+                    ),
+                    ('band_6', 
+                        OrderedDict([
+                        ('freqmin', 0.30),
+                        ('freqmax', 0.40),
+                        ('freq_unit', 'Hz'),
+                        ('mean_phase_vel', phasv_means[5]),
+                        ('vel_std', phasv_stds[5]),
+                        ('vel_unit', 'km/s')
+                        ])
+                    ),
+                    ('band_7', 
+                        OrderedDict([
+                        ('freqmin', 0.40),
+                        ('freqmax', 0.60),
+                        ('freq_unit', 'Hz'),
+                        ('mean_phase_vel', phasv_means[6]),
+                        ('vel_std', phasv_stds[6]),
+                        ('vel_unit', 'km/s')
+                        ])
+                    ),
+                    ('band_8', 
+                        OrderedDict([
+                        ('freqmin', 0.60),
+                        ('freqmax', 1.0),
+                        ('freq_unit', 'Hz'),
+                        ('mean_phase_vel', phasv_means[7]),
+                        ('vel_std', phasv_stds[7]),
+                        ('vel_unit', 'km/s')
+                        ])
+                    )
+                    ])
+                )
+                ])
+            )
+            ])  
 
+    # if: json already created for previous station, overwrite event info
+    # else: write a new json file !!! assumes the event information is the same
+    filename_json = folder_name + tag_name + '.json'
+
+    if os.path.exists(filename_json): 
+        dic_event = json.load(open(filename_json),object_pairs_hook=OrderedDict)
+
+    # combine two dictionaries, save
+    dic_event.update(dic_station)
+
+    outfile = open(filename_json, 'wt')
+    json.dump(dic,outfile,indent=4)
     outfile.close()
 
 
@@ -1367,9 +1422,7 @@ def store_info_xml(folder_name,tag_name):
     filename_json = folder_name + tag_name + '.json'
     filename_xml = folder_name + tag_name + '.xml'
 
-
-    with open(filename_json) as data_file:
-        data = json.load(data_file)
+    data = json.load(open(filename_json))
 
     rotational_parameters = ['epicentral_distance',
                              'theoretical_backazimuth',
@@ -2328,7 +2381,8 @@ if __name__ == '__main__':
         # print event divider
         event_information = str(event).split('\n')[0][7:]
         flinn_engdahl = event.event_descriptions[0]['text']
-        print('{}\n{}\n{}\n{}'.format(bars,flinn_engdahl,event_information,bars))
+        print('{}\n{}\n{}\n{}'.format(
+                                    bars,flinn_engdahl,event_information,bars))
 
         try:
             # create tags for standard filenaming
@@ -2339,6 +2393,10 @@ if __name__ == '__main__':
             substitutions = [(', ', '_'),(' ','_')]
             for search, replace in substitutions:
                 flinn_engdahl = flinn_engdahl.replace(search,replace)
+
+            # remove '.' from end of region name if necessary (i.e. _P.N.G.)
+            if flinn_engdahl[-1] == '.':
+                flinn_engdahl = flinn_engdahl[:-1]
 
             # ISO861 Time Format, i.e. '2017-09-23T125302Z'
             time_tag = event.origins[0]['time'].isoformat(
@@ -2379,7 +2437,7 @@ if __name__ == '__main__':
         except IndexError:
             print('No Magnitude picked for this Event')
 
-    print('{}/n'.format(bars))
+    print('{}\n'.format(bars))
     print('Catalog complete, no more events to show.')
     print('From a total of %i event(s):\n %i was/were successfully processed.'
           '\n %i could not be processed. \n %i already processed.\n' % (
