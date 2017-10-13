@@ -1868,18 +1868,24 @@ def plotWaveformComp(event, station, link, mode, event_source, folder_name,
 
     # P coda
     plt.subplot2grid((6, 5), (0, 0), colspan=2)
-    cop_rt_SR = int(cop_rt[0].stats.sampling_rate) # integer not float
+    # create integers for indexing
+    cop_rt_SR = int(cop_rt[0].stats.sampling_rate) 
     rt_SR = int(rt[0].stats.sampling_rate)
 
-    cp = 0.5 * (max(abs(pcod_rotate[1][cop_rt_SR * min_pw:cop_rt_SR * max_pw]))/
-             max(abs(cop_rt[0].data[cop_rt_SR * min_pw:cop_rt_SR * max_pw])))
-    minamp1_pcod = min((0.5 / cp) * 
-                                pcod_rotate[1][rt_SR * min_pw:rt_SR * max_pw])
-    minamp2_pcod = min(cop_rt[0].data[rt_SR * min_pw:rt_SR * max_pw])
+    min_pw_cop = round(cop_rt_SR * min_pw)
+    max_pw_cop = round(cop_rt_SR * max_pw)
+    min_pw_rt = round(cop_rt * min_pw)
+    max_pw_rt = round(cop_rt * max_pw)
 
-    maxamp1_pcod = max((0.5 / cp) * 
-                            pcod_rotate[1][rt_SR * min_pw:rt_SR * max_pw])
-    maxamp2_pcod = max(cop_rt[0].data[rt_SR * min_pw:rt_SR * max_pw])
+
+    cp = 0.5 * (max(abs(pcod_rotate[1][min_pw_cop:max_pw_cop]))/
+                max(abs(cop_rt[0].data[min_pw_cop:max_pw_cop])))
+
+    minamp1_pcod = min((0.5 / cp) * pcod_rotate[1][min_pw_rt:max_pw_rt])
+    minamp2_pcod = min(cop_rt[0].data[min_pw_rt:max_pw_rt])
+
+    maxamp1_pcod = max((0.5 / cp) * pcod_rotate[1][min_pw_rt:max_pw_rt])
+    maxamp2_pcod = max(cop_rt[0].data[min_pw_rt:max_pw_rt])
 
     plt.plot(time, cop_rt[0].data, color='r')
     plt.plot(time, (0.5 / cp) * pcod_rotate[1], color='k')
@@ -1896,13 +1902,20 @@ def plotWaveformComp(event, station, link, mode, event_source, folder_name,
 
     # S wave
     plt.subplot2grid((6, 5), (0, 3), colspan=2)
-    # colorscale??
-    cs = 0.5 * (max(abs(rotate[1][rt_SR * min_sw:rt_SR * max_sw])) / 
-                max(abs(rt[0].data[rt_SR * min_sw:rt_SR * max_sw])))
-    minamp1_s = min((0.5 / cs) * rotate[1][rt_SR * min_sw:rt_SR * max_sw])
-    minamp2_s = min(rt[0].data[rt_SR * min_sw:rt_SR * max_sw])
-    maxamp1_s = max((0.5 / cs) * rotate[1][rt_SR* min_sw:rt_SR* max_sw])
-    maxamp2_s = max(rt[0].data[rt_SR * min_sw:rt_SR * max_sw])
+
+    # create integers for indexing
+    min_sw_cop = round(cop_rt_SR * min_sw)
+    max_sw_cop = round(cop_rt_SR * max_sw)
+    min_sw_rt = round(cop_rt * min_sw)
+    max_sw_rt = round(cop_rt * max_sw)
+
+    cs = 0.5 * (max(abs(rotate[1][min_sw_rt:max_sw_rt])) / 
+                max(abs(rt[0].data[min_sw_rt:max_sw_rt])))
+
+    minamp1_s = min((0.5 / cs) * rotate[1][min_sw_rt:max_sw_rt])
+    minamp2_s = min(rt[0].data[min_sw_rt:max_sw_rt])
+    maxamp1_s = max((0.5 / cs) * rotate[1][min_sw_rt:max_sw_rt])
+    maxamp2_s = max(rt[0].data[min_sw_rt:max_sw_rt])
 
     plt.plot(time, rt[0].data, color='r')
     plt.plot(time, (0.5 / cs) * rotate[1], color='k')
@@ -1920,12 +1933,17 @@ def plotWaveformComp(event, station, link, mode, event_source, folder_name,
 
     # surface waves
     plt.subplot2grid((6, 5), (5, 0), colspan=2)
-    cl1 = 0.5 * (max(abs(rotate[1][rt_SR * min_lwi:rt_SR * max_lwi])) /
-                 max(abs(rt[0].data[rt_SR * min_lwi:rt_SR * max_lwi])))
-    minamp1_surf = min((0.5 / cl1) * rotate[1][rt_SR * min_lwi:rt_SR * max_lwi])
-    minamp2_surf = min(rt[0].data[rt_SR * min_lwi:rt_SR * max_lwi])
-    maxamp1_surf = max((0.5 / cl1) * rotate[1][rt_SR* min_lwi:rt_SR * max_lwi])
-    maxamp2_surf = max(rt[0].data[rt_SR * min_lwi:rt_SR * max_lwi])
+
+    # create integers for indexing
+    min_lwi_rt = round(cop_rt * min_sw)
+    max_lwi_rt = round(cop_rt * max_sw)
+
+    cl1 = 0.5 * (max(abs(rotate[1][min_lwi_rt:max_lwi_rt])) /
+                 max(abs(rt[0].data[min_lwi_rt:max_lwi_rt])))
+    minamp1_surf = min((0.5 / cl1) * rotate[1][min_lwi_rt:max_lwi_rt])
+    minamp2_surf = min(rt[0].data[min_lwi_rt:max_lwi_rt])
+    maxamp1_surf = max((0.5 / cl1) * rotate[1][min_lwi_rt:max_lwi_rt])
+    maxamp2_surf = max(rt[0].data[min_lwi_rt:max_lwi_rt])
 
     plt.plot(time, rt[0].data, color='r')
     plt.plot(time, (0.5 / cl1) * rotate[1], color='k')
@@ -1944,12 +1962,17 @@ def plotWaveformComp(event, station, link, mode, event_source, folder_name,
 
     # later surface waves
     plt.subplot2grid((6, 5), (5, 3), colspan=2)
-    cl2 = 0.5 * (max(abs(rotate[1][rt_SR * min_lwf:rt_SR * max_lwf])) /
-                 max(abs(rt[0].data[rt_SR * min_lwf:rt_SR * max_lwf])))
-    minamp1_lat = min((0.5 / cl2) * rotate[1][rt_SR* min_lwf:rt_SR * max_lwf])
-    minamp2_lat = min(rt[0].data[rt_SR * min_lwf:rt_SR * max_lwf])
-    maxamp1_lat = max((0.5 / cl2) * rotate[1][rt_SR* min_lwf:rt_SR * max_lwf])
-    maxamp2_lat = max(rt[0].data[rt_SR * min_lwf:rt_SR * max_lwf])
+
+    # create integers for indexing
+    min_lwf_rt = round(cop_rt * min_sw)
+    max_lwf_rt = round(cop_rt * max_sw)
+
+    cl2 = 0.5 * (max(abs(rotate[1][min_lwf_rt:max_lwf_rt])) /
+                 max(abs(rt[0].data[min_lwf_rt:max_lwf_rt])))
+    minamp1_lat = min((0.5 / cl2) * rotate[1][min_lwf_rt:max_lwf_rt])
+    minamp2_lat = min(rt[0].data[min_lwf_rt:max_lwf_rt])
+    maxamp1_lat = max((0.5 / cl2) * rotate[1][min_lwf_rt:max_lwf_rt])
+    maxamp2_lat = max(rt[0].data[min_lwf_rt:max_lwf_rt])
 
     plt.plot(time, rt[0].data, color='r')
     plt.plot(time, (0.5 / cl2) * rotate[1], color='k')
@@ -2001,7 +2024,8 @@ def plotWaveformComp(event, station, link, mode, event_source, folder_name,
 
     # Estimating backazimuth
     print('Estimating backazimuth')
-    corrsum, backas2, max_ebaz_xcoef, best_ebaz = backas_est(rt, ac, min_sw, max_lwf, station)
+    corrsum, backas2, max_ebaz_xcoef, best_ebaz = backas_est(
+                                            rt, ac, min_sw, max_lwf, station)
 
     # calculate phase veloc. for windows where corrcoef is good enough (.75)
     print('Calculating phase velocities')
