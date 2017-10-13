@@ -1247,8 +1247,6 @@ def store_info_json(rotate, ac, rt, corrcoefs, baz, arriv_p, EBA, folder_name,
     
     # common event dictionary
     dic_event = OrderedDict([
-            ('event_information', 
-                OrderedDict([
                 ('event_id',event.resource_id.id),
                 ('event_source',event_source),
                 ('starttime',str(startev-180)),
@@ -1257,8 +1255,6 @@ def store_info_json(rotate, ac, rt, corrcoefs, baz, arriv_p, EBA, folder_name,
                 ('depth',depth),
                 ('depth_unit','km')
                 ])
-            )
-            ])
 
     # individual station dictionary w/ rotational parameters
     dic_station = OrderedDict([
@@ -1406,7 +1402,7 @@ def store_info_json(rotate, ac, rt, corrcoefs, baz, arriv_p, EBA, folder_name,
     outfile.close()
 
 
-def store_info_xml(folder_name,tag_name):
+def store_info_xml(folder_name,tag_name,station):
 
     """
     Store extra parameters in the xml file under the namespace rotational
@@ -1419,45 +1415,43 @@ def store_info_xml(folder_name,tag_name):
     :type tag_name: string
     :param tag_name: Handle of the event.
     """
+    ns = 'http://www.rotational-seismology.org'
     filename_json = folder_name + tag_name + '.json'
     filename_xml = folder_name + tag_name + '.xml'
 
     data = json.load(open(filename_json))
-
     rotational_parameters = ['epicentral_distance',
                              'theoretical_backazimuth',
                              'peak_correlation_coefficient']
 
-    ns = 'http://www.rotational-seismology.org'
-
     cat = read_events(pathname_or_url=filename_xml, format='QUAKEML')
     cat[0].extra = AttribDict()
 
-    for station, values in data['rotational_parameters'].items():
-        RP_list = []
-        for RP in rotational_parameters:
-            RP_list.append(data[RP])
+    # grab data from json file
+    RP_list = []
+    for RP in rotational_parameters:
+        RP_list.append(data['station_information_{}'.format(station)][RP])
 
-        params = AttribDict()
-        params.namespace = ns
-        params.value = AttribDict()
+    params = AttribDict()
+    params.namespace = ns
+    params.value = AttribDict()
 
-        params.value.epicentral_distance = AttribDict()
-        params.value.epicentral_distance.namespace = ns
-        params.value.epicentral_distance.value = RP_list[0]
-        params.value.epicentral_distance.attrib = {'unit':"km"}
+    params.value.epicentral_distance = AttribDict()
+    params.value.epicentral_distance.namespace = ns
+    params.value.epicentral_distance.value = RP_list[0]
+    params.value.epicentral_distance.attrib = {'unit':"km"}
 
-        params.value.theoretical_backazimuth = AttribDict()
-        params.value.theoretical_backazimuth.namespace = ns
-        params.value.theoretical_backazimuth.value = RP_list[1]
-        params.value.theoretical_backazimuth.attrib = {'unit':"degree"}
+    params.value.theoretical_backazimuth = AttribDict()
+    params.value.theoretical_backazimuth.namespace = ns
+    params.value.theoretical_backazimuth.value = RP_list[1]
+    params.value.theoretical_backazimuth.attrib = {'unit':"degree"}
 
-        params.value.peak_correlation_coefficient = AttribDict()
-        params.value.peak_correlation_coefficient.namespace = ns
-        params.value.peak_correlation_coefficient.value = RP_list[2]
-        cat[0].extra['rotational_parameters_{}'.format(station)] = {
-            'namespace': ns,
-            'value': params}
+    params.value.peak_correlation_coefficient = AttribDict()
+    params.value.peak_correlation_coefficient.namespace = ns
+    params.value.peak_correlation_coefficient.value = RP_list[2]
+    cat[0].extra['rotational_parameters_{}'.format(station)] = {
+        'namespace': ns,
+        'value': params}
 
     cat.write(filename_xml, "QUAKEML",nsmap={"rotational_seismology_database": 
                                     r"http://www.rotational-seismology.org"})
@@ -2263,7 +2257,7 @@ def plotWaveformComp(event, station, link, mode, event_source, folder_name,
                     source, loc_r, loc_s, event_source, depth, displacement,
                     event.magnitudes[0]['mag'], 0.001*baz[0], max_ebaz_xcoef)
 
-    store_info_xml(folder_name,tag_name)
+    store_info_xml(folder_name,tag_name,station)
 
     print('Completed and Saved')
 
