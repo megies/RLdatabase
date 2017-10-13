@@ -274,11 +274,11 @@ def event_info_data(event, station, mode, polarity, instrument):
     depth = origin.depth * 0.001  # Depth in km
 
     if station == 'WET':
-        source = 'http://erde.geophysik.uni-muenchen.de' # if ! erde , try 'BGR'
+        source = 'LMU' #'LMU' or 'BGR'
         net_r = 'BW'
-        net_s = 'GR' #BW'
+        net_s = 'GR' 
         sta_r = 'RLAS'
-        sta_s = 'WET'#'WETR'
+        sta_s = 'WET'
         loc_r = ''
         loc_s = ''
         if origin.time < UTCDateTime(2010, 4, 16):
@@ -331,6 +331,8 @@ def event_info_data(event, station, mode, polarity, instrument):
         ac = c.get_waveforms(network=net_s, station=sta_s, location='00',
                              channel='BH*', starttime=startev - 180,
                              endtime=startev + 3 * 3600, attach_response=True)
+
+
 
     # theoretical event backazimuth and distance
     baz = gps2dist_azimuth(latter, lonter, rt[0].stats.coordinates.latitude,
@@ -2266,7 +2268,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Comparison of transversal\
         acceleration and vertical rotation rate through direct waveform\
         comparison in different time windows and cross-correlation analysis.')
-    parser.add_argument('--station', help='Choice of station: WET or PFO\
+    parser.add_argument('--station', help='Choice of station: WET, ROMY, PFO\
         (default is WET)', type=str, default='WET')
     parser.add_argument('--mode', help='Choice of executive mode for WET: \
         fetch event data from GCMT catalog or get it from a link (for plotting\
@@ -2346,7 +2348,8 @@ if __name__ == '__main__':
         catalog='GCMT'
         event_source = "GCMT"
         if UTCDateTime(args.min_datetime) < UTCDateTime(2014,1,1):
-            cat_all = read_events('NDK_events_before2014.ndk')
+            cat_all = read_events(
+                            './populate_database/NDK_events_before2014.ndk')
         else:
             cat_all = read_events('http://www.ldeo.columbia.edu/~gcmt/projects/'
                                             'CMT/catalog/NEW_QUICK/qcmt.ndk')
