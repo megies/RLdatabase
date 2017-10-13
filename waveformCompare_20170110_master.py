@@ -274,7 +274,7 @@ def event_info_data(event, station, mode, polarity, instrument):
     depth = origin.depth * 0.001  # Depth in km
 
     if station == 'WET':
-        source = 'LMU' #'LMU' or 'BGR'
+        source = 'http://erde.geophysik.uni-muenchen.de' #'LMU' or 'BGR'
         net_r = 'BW'
         net_s = 'GR' 
         sta_r = 'RLAS'
@@ -1084,13 +1084,15 @@ def backas_est(rt, ac, min_sw, max_lwf, station):
     """
     compE, compN = station_components(station)
     rt_SR = int(rt[0].stats.sampling_rate)
+    min_sw_rt = int(round(min_sw*rt_SR))
+    max_lwf_rt = int(round(max_lwf*rt_SR))
 
-    rt2 = rt[0].data[min_sw * rt_SR:max_lwf * rt_SR]
-    acn2 = ac.select(component=compN)[0].data[min_sw * rt_SR:max_lwf * rt_SR]
-    ace2 = ac.select(component=compE)[0].data[min_sw * rt_SR:max_lwf * rt_SR]
+    rt2 = rt[0].data[min_sw_rt:max_lwf_rt]
+    acn2 = ac.select(component=compN)[0].data[min_sw_rt:max_lwf_rt]
+    ace2 = ac.select(component=compE)[0].data[min_sw_rt:max_lwf_rt]
     sec2 = 30
     step2 = 1
-    backas2 = np.linspace(0, 360 - step2, 360 / step2) # BAz array
+    backas2 = np.linspace(0, int(360 - step2), int(360 / step2)) # BAz array
     corrbaz2 = []
 
     for j3 in range(len(backas2)):
@@ -1101,7 +1103,8 @@ def backas_est(rt, ac, min_sw, max_lwf, station):
             corrbaz2.append(corrbazz2[1]) # corr. coefficients for BAz-array
 
     corrbaz2 = np.asarray(corrbaz2)
-    corrbaz2 = corrbaz2.reshape(len(backas2), len(corrbaz2) / len(backas2))
+    corrbaz2 = corrbaz2.reshape(len(backas2), int(round(
+                                    len(corrbaz2) / len(backas2))))
     corrsum = []
     
     for j1 in range(len(corrbaz2[:, 0])):
@@ -1117,7 +1120,8 @@ def backas_est(rt, ac, min_sw, max_lwf, station):
         corrsum.append(bazsum)
 
     best_ebaz = backas2[np.asarray(corrsum).argmax()] # = EBA!
-    max_ebaz_xcoef = np.max(corrbaz2[best_ebaz]) # maximum corr. coeff. for EBA
+    max_ebaz_xcoef = np.max(corrbaz2[int(best_ebaz)]) # maximum corr. coeff. for EBA
+
 
     return corrsum, backas2, max_ebaz_xcoef, best_ebaz
 
@@ -1194,6 +1198,7 @@ def sn_ratio(full_signal, p_arrival, sam_rate):
     :return SNR: Signal-to-noise ratio of the seismogram.
     """
     sam_rate = int(sam_rate)
+    p_arrival = int(round(p_arrival))
 
     tr_sign = max(full_signal)
     tr_noise = abs(np.mean(full_signal[sam_rate * (p_arrival - 180): sam_rate
@@ -1246,13 +1251,13 @@ def store_info_json(rotate, ac, rt, corrcoefs, baz, arriv_p, EBA, folder_name,
     SNT = sn_ratio(rotate[1], arriv_p, ac.select(component=compN)[0].
                                         stats.sampling_rate)  # Transv. Acc SNR
     SNR = sn_ratio(rt[0].data, arriv_p, rt[0].stats.sampling_rate) # SNR for RR
-    
+
     # common event dictionary
     dic_event = OrderedDict([
                 ('event_id',event.resource_id.id),
                 ('event_source',event_source),
                 ('starttime',str(startev-180)),
-                ('endtime',str(startev+3*3600))
+                ('endtime',str(startev+3*3600)),
                 ('magnitude',magnitude),
                 ('depth',depth),
                 ('depth_unit','km')
@@ -1270,7 +1275,7 @@ def store_info_json(rotate, ac, rt, corrcoefs, baz, arriv_p, EBA, folder_name,
                     ('station', sta_r),
                     ('loc', loc_r),
                     ('channel', chan1),
-                    ('data source', source)
+                    ('data_source', source)
                     ])
                 ),
                 ('translation_station', 
@@ -1284,7 +1289,7 @@ def store_info_json(rotate, ac, rt, corrcoefs, baz, arriv_p, EBA, folder_name,
                     ('data source', source)
                     ])
                 ),
-                ('rotatational_parameters'.format(station),
+                ('rotational_parameters'.format(station),
                     OrderedDict([
                     ('epicentral_distance', distance),
                     ('epicentral_distance_unit', 'km'),
@@ -1300,7 +1305,7 @@ def store_info_json(rotate, ac, rt, corrcoefs, baz, arriv_p, EBA, folder_name,
                     ('vertical_rotation_rate_SNR', SNR),
                     ('transverse_acceleration_SNR', SNT),
                     ])
-                )
+                ),
                 ('phase_velocities'.format(station), 
                     OrderedDict([
                     ('band_1', 
@@ -1400,7 +1405,7 @@ def store_info_json(rotate, ac, rt, corrcoefs, baz, arriv_p, EBA, folder_name,
     dic_event.update(dic_station)
 
     outfile = open(filename_json, 'wt')
-    json.dump(dic,outfile,indent=4)
+    json.dump(dic_event,outfile,indent=4)
     outfile.close()
 
 
@@ -1428,12 +1433,12 @@ def store_info_xml(folder_name,tag_name,station):
 
     cat = read_events(pathname_or_url=filename_xml, format='QUAKEML')
     cat[0].extra = AttribDict()
-
+    from IPython.core.debugger import Tracer; Tracer(colors="Linux")()
     # grab data from json file
     RP_list = []
     for RP in rotational_parameters:
-        RP_list.append(data['station_information_{}'.format(station)][RP])
-
+        RP_list.append(data['station_information_{}'.format(station)]
+                                            ['rotational_parameters'][RP])
     params = AttribDict()
     params.namespace = ns
     params.value = AttribDict()
@@ -1451,9 +1456,10 @@ def store_info_xml(folder_name,tag_name,station):
     params.value.peak_correlation_coefficient = AttribDict()
     params.value.peak_correlation_coefficient.namespace = ns
     params.value.peak_correlation_coefficient.value = RP_list[2]
-    cat[0].extra['rotational_parameters_{}'.format(station)] = {
-        'namespace': ns,
-        'value': params}
+  
+    for name,item in params.value.items():
+        cat[0].extra['rotational_parameters_{}'.format(station)][name]=item
+
 
     cat.write(filename_xml, "QUAKEML",nsmap={"rotational_seismology_database": 
                                     r"http://www.rotational-seismology.org"})
@@ -1872,12 +1878,11 @@ def plotWaveformComp(event, station, link, mode, event_source, folder_name,
     cop_rt_SR = int(cop_rt[0].stats.sampling_rate) 
     rt_SR = int(rt[0].stats.sampling_rate)
 
-    min_pw_cop = round(cop_rt_SR * min_pw)
-    max_pw_cop = round(cop_rt_SR * max_pw)
-    min_pw_rt = round(cop_rt * min_pw)
-    max_pw_rt = round(cop_rt * max_pw)
-
-
+    min_pw_cop = int(round(cop_rt_SR * min_pw))
+    max_pw_cop = int(round(cop_rt_SR * max_pw))
+    min_pw_rt = int(round(rt_SR * min_pw))
+    max_pw_rt = int(round(rt_SR * max_pw))
+    
     cp = 0.5 * (max(abs(pcod_rotate[1][min_pw_cop:max_pw_cop]))/
                 max(abs(cop_rt[0].data[min_pw_cop:max_pw_cop])))
 
@@ -1904,10 +1909,8 @@ def plotWaveformComp(event, station, link, mode, event_source, folder_name,
     plt.subplot2grid((6, 5), (0, 3), colspan=2)
 
     # create integers for indexing
-    min_sw_cop = round(cop_rt_SR * min_sw)
-    max_sw_cop = round(cop_rt_SR * max_sw)
-    min_sw_rt = round(cop_rt * min_sw)
-    max_sw_rt = round(cop_rt * max_sw)
+    min_sw_rt = int(round(rt_SR * min_sw))
+    max_sw_rt = int(round(rt_SR * max_sw))
 
     cs = 0.5 * (max(abs(rotate[1][min_sw_rt:max_sw_rt])) / 
                 max(abs(rt[0].data[min_sw_rt:max_sw_rt])))
@@ -1935,8 +1938,8 @@ def plotWaveformComp(event, station, link, mode, event_source, folder_name,
     plt.subplot2grid((6, 5), (5, 0), colspan=2)
 
     # create integers for indexing
-    min_lwi_rt = round(cop_rt * min_sw)
-    max_lwi_rt = round(cop_rt * max_sw)
+    min_lwi_rt = int(round(rt_SR * min_sw))
+    max_lwi_rt = int(round(rt_SR * max_sw))
 
     cl1 = 0.5 * (max(abs(rotate[1][min_lwi_rt:max_lwi_rt])) /
                  max(abs(rt[0].data[min_lwi_rt:max_lwi_rt])))
@@ -1964,8 +1967,8 @@ def plotWaveformComp(event, station, link, mode, event_source, folder_name,
     plt.subplot2grid((6, 5), (5, 3), colspan=2)
 
     # create integers for indexing
-    min_lwf_rt = round(cop_rt * min_sw)
-    max_lwf_rt = round(cop_rt * max_sw)
+    min_lwf_rt = int(round(rt_SR * min_sw))
+    max_lwf_rt = int(round(rt_SR * max_sw))
 
     cl2 = 0.5 * (max(abs(rotate[1][min_lwf_rt:max_lwf_rt])) /
                  max(abs(rt[0].data[min_lwf_rt:max_lwf_rt])))
@@ -2174,9 +2177,10 @@ def plotWaveformComp(event, station, link, mode, event_source, folder_name,
         sec_p = 2
 
     corrcoefs_p = []
-    rt_pcodaxc = frtp[0].data[0: (min_lwi + max_lwi) // 2 * int(
+    lwi_average = int(round((min_lwi+max_lwi)/2))
+    rt_pcodaxc = frtp[0].data[0:lwi_average * int(
                                         rt_pcoda[0].stats.sampling_rate)]
-    pcoda_rotatexc = frotate[1][0: (min_lwi + max_lwi) // 2 * int(
+    pcoda_rotatexc = frotate[1][0:lwi_average * int(
                                         facp[0].stats.sampling_rate)]
 
     corrcoefs_p, thres_p = Get_corrcoefs(rt_pcoda[0], rt_pcodaxc, facp,
@@ -2184,8 +2188,10 @@ def plotWaveformComp(event, station, link, mode, event_source, folder_name,
 
     print('Backazimuth analysis')
 
+    # integers for indexing
     ac_pc_SR = int(ac_pcoda[0].stats.sampling_rate)
-    ind = max_lwi * facp[0].stats.sampling_rate
+    max_lwi_ac = int(round(ac_pc_SR * max_lwi))
+    ind = int(round(max_lwi * facp[0].stats.sampling_rate))
 
     corrbazp, maxcorrp, backas, max_coefs_10deg_p = backas_analysis(frtp[0], 
                             rt_pcodaxc, facp, sec_p, corrcoefs_p, ind, station)
@@ -2195,9 +2201,9 @@ def plotWaveformComp(event, station, link, mode, event_source, folder_name,
     # TAPER
     rt_pcoda.taper(max_percentage=0.05)
     time_p = rt_pcoda[0].stats.delta * np.arange(0, len(rt_pcoda[0].data))
-    fact1_p = 2 * max(rt_pcoda[0].data[0:max_lwi * ac_pc_SR])
-    c1_p = .5 * (max(abs(pcoda_rotate[1][0: max_lwi * ac_pc_SR])) /
-                max(abs(rt_pcoda[0].data[0: max_lwi * ac_pc_SR])))
+    fact1_p = 2 * max(rt_pcoda[0].data[0:max_lwi_ac])
+    c1_p = .5 * (max(abs(pcoda_rotate[1][0: max_lwi_ac])) /
+                max(abs(rt_pcoda[0].data[0: max_lwi_ac])))
 
     maxcorrp_over50 = []
     for i10 in range(0, len(maxcorrp)):
@@ -2213,8 +2219,8 @@ def plotWaveformComp(event, station, link, mode, event_source, folder_name,
     plt.ylabel(r'a$_\mathbf{Z}$ [nm/s$^2$]', fontweight='bold', fontsize=11)
     plt.ticklabel_format(axis='y', style='sci', scilimits=(-2,2))
     plt.xlim(0, (min_lwi + max_lwi) // 2)
-    plt.ylim(min(ac_pcoda.select(component='Z')[0].data[0:max_lwi * ac_pc_SR]),
-             max(ac_pcoda.select(component='Z')[0].data[0:max_lwi * ac_pc_SR]))
+    plt.ylim(min(ac_pcoda.select(component='Z')[0].data[0:max_lwi_ac]),
+             max(ac_pcoda.select(component='Z')[0].data[0:max_lwi_ac]))
     plt.title(r'$\dot{\mathbf{\Omega}}_\mathbf{z}$ and a$_\mathbf{T}$'
               'correlation in the P-coda in a %d seconds time window'
               ' (highpass, cutoff: 1 Hz). Event: %s %s' % 
@@ -2228,13 +2234,13 @@ def plotWaveformComp(event, station, link, mode, event_source, folder_name,
     plt.ylabel(r'$\dot{\mathbf{\Omega}}_\mathbf{z}$ [nrad/s] -'
                    'a$_\mathbf{T}$/2c [1/s]', fontweight='bold', fontsize=11)
     plt.xlim(0, (min_lwi + max_lwi) // 2)
-    plt.ylim(min(rt_pcoda[0].data[0: max_lwi * ac_pc_SR]), 
+    plt.ylim(min(rt_pcoda[0].data[0:max_lwi_ac]), 
                                         fact1_p + max((1. / (2. * c1_p)) * 
-                                        pcoda_rotate[1][0: max_lwi * ac_pc_SR]))
+                                        pcoda_rotate[1][0: max_lwi_ac]))
     xlim2 = (min_lwi + max_lwi) // 2
     box_yposition2 = (fact1_p + max((1. / (2. * c1_p)) * 
-                        pcoda_rotate[1][0: max_lwi * ac_pc_SR]) -
-                        np.abs(min(rt_pcoda[0].data[0: max_lwi * ac_pc_SR])))/2.
+                        pcoda_rotate[1][0:max_lwi_ac]) -
+                        np.abs(min(rt_pcoda[0].data[0: max_lwi_ac])))/2.
     plt.axvline(x=min_pw, linewidth=1)
     plt.annotate('P-arrival', 
                             xy=(min_pw+xgap*float(xlim2/xlim1),box_yposition2), 
@@ -2432,6 +2438,7 @@ if __name__ == '__main__':
             if os.path.exists(str(folder_name)):
                 print('This event was already processed...\n')
                 contador1 += 1
+            
 
             elif not os.path.exists(str(folder_name)):  # mk event directory 
                 os.makedirs(str(folder_name))
@@ -2454,7 +2461,7 @@ if __name__ == '__main__':
                         print(e)
                         print('Removing incomplete folder...\n')
                         shutil.rmtree(folder_name)
-                        
+                            
         except IndexError:
             print('No Magnitude picked for this Event')
 
