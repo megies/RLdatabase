@@ -95,10 +95,10 @@ from obspy.core.util.attribdict import AttribDict
 from obspy.geodetics.base import gps2dist_azimuth, locations2degrees
 
 
-warnings.filterwarnings(
-    action='once', category=np.VisibleDeprecationWarning,
-    message='using a non-integer number instead of an integer will result in '
-            'an error in the future')
+# warnings.filterwarnings(
+#     action='once', category=np.VisibleDeprecationWarning,
+#     message='using a non-integer number instead of an integer will result in '
+#             'an error in the future')
 
 # if matplotlib.__version__ < '1.0':  # Matplotlib 1.0 or newer is necessary
 #     raise ValueError('I need Matplotlib version 1.0 or newer.')
@@ -190,7 +190,8 @@ def download_data(origin_time, net, sta, loc, chan, source):
 
     except:
         print("\tFailed, fetching data from file")
-        dataDir_get = '/bay200/mseed_online/archive/'
+        dataDir_get = '/Users/Chow/Documents/Geophysik/post-grad/magscale_paper/code_test'
+        # dataDir_get = '/bay200/mseed_online/archive/'
         # dataDir_get = '/import/netapp-m-02-bay200/mseed_online/archive/' # LMU
         fileName = ".".join((net, sta, "." + chan + ".D",
                              origin_time.strftime("%Y.%j")))
@@ -1426,19 +1427,27 @@ def store_info_xml(folder_name,tag_name,station):
     filename_json = folder_name + tag_name + '.json'
     filename_xml = folder_name + tag_name + '.xml'
 
+    # grab data from json file
     data = json.load(open(filename_json))
     rotational_parameters = ['epicentral_distance',
                              'theoretical_backazimuth',
                              'peak_correlation_coefficient']
-
-    cat = read_events(pathname_or_url=filename_xml, format='QUAKEML')
-    cat[0].extra = AttribDict()
-    from IPython.core.debugger import Tracer; Tracer(colors="Linux")()
-    # grab data from json file
     RP_list = []
     for RP in rotational_parameters:
         RP_list.append(data['station_information_{}'.format(station)]
                                             ['rotational_parameters'][RP])
+
+    cat = read_events(pathname_or_url=filename_xml, format='QUAKEML')
+    # creating a nested dictionary for parameters
+    cat[0].extra = AttribDict()
+
+    cat[0].extra['rotational_parameters_{}'.format(station)] = AttribDict()
+    cat[0].extra['rotational_parameters_{}'.format(station)].value\
+                                                                 = AttribDict()
+    cat[0].extra['rotational_parameters_{}'.format(station)].namespace = ns
+
+
+
     params = AttribDict()
     params.namespace = ns
     params.value = AttribDict()
@@ -1457,11 +1466,16 @@ def store_info_xml(folder_name,tag_name,station):
     params.value.peak_correlation_coefficient.namespace = ns
     params.value.peak_correlation_coefficient.value = RP_list[2]
   
+    # for name, item in params.value.items():
+    #     cat[0].extra[name] = item
+    # cat[0].extra['rotational_parameters_{}'.format(station)] = params
+
     for name,item in params.value.items():
-        cat[0].extra['rotational_parameters_{}'.format(station)][name]=item
+        cat[0].extra['rotational_parameters_{}'.format(station)]\
+                                                        ['value'][name]=item
 
 
-    cat.write(filename_xml, "QUAKEML",nsmap={"rotational_seismology_database": 
+    cat.write(filename_xml,"QUAKEML",nsmap={"rotational_seismology_database": 
                                     r"http://www.rotational-seismology.org"})
 
 
@@ -2346,18 +2360,19 @@ if __name__ == '__main__':
     check_files = args.check_files
     polarity = args.polarity
     instrument = args.instrument.upper()
-    print('\nDownloading Events')
 
     # This link leads to the quakeml webpage of a certain event on IRIS.
     # The fetched xml provides a moment tensor data for the beachballs.
     link = 'http://www.iris.edu/spudservice/momenttensor/736631/quakeml'
 
     if station == 'WET' and mode == 'qmlfile':
+        print('\nDownloading events from QuakeML')
         quakeml = './populate_database/extra_events.xml'
         cat = read_events(quakeml, format='QUAKEML')
         event_source = "ISC_"
         catalog='ISC_'
     elif mode == 'fdsn':
+        print('\nDownloading events from IRIS')
         catalog='GCMT'
         event_source = "IRIS"
         c = fdsnClient(event_source)
@@ -2378,9 +2393,11 @@ if __name__ == '__main__':
         catalog='GCMT'
         event_source = "GCMT"
         if UTCDateTime(args.min_datetime) < UTCDateTime(2014,1,1):
+            print('\nDownloading events from NDK catalog')
             cat_all = read_events(
                             './populate_database/NDK_events_before2014.ndk')
         else:
+            print('\nDownloading events from GCMT catalog')
             cat_all = read_events('http://www.ldeo.columbia.edu/~gcmt/projects/'
                                             'CMT/catalog/NEW_QUICK/qcmt.ndk')
 
@@ -2401,7 +2418,7 @@ if __name__ == '__main__':
     if not os.path.exists(output_path): 
         os.makedirs(output_path)
 
-    print('Downloaded %i events. Beginning processing.' % len(cat))
+    print('%i event(s) downloaded, beginning processing...' % len(cat))
     contador1 = contador2 = contador3 = 0
     bars = '='*79
     for event in cat:
@@ -2462,8 +2479,8 @@ if __name__ == '__main__':
                         print('Removing incomplete folder...\n')
                         shutil.rmtree(folder_name)
                             
-        except IndexError:
-            print('No Magnitude picked for this Event')
+        except Exception as e:
+            print(e)
 
     print('{}\n'.format(bars))
     print('Catalog complete, no more events to show.')
@@ -2471,5 +2488,6 @@ if __name__ == '__main__':
           '\n %i could not be processed. \n %i already processed.\n' % (
               len(cat), contador2, contador3, contador1))
 
-### DEBUGGER
-#from IPython.core.debugger import Tracer; Tracer(colors="Linux")()
+
+# DEBUGGER
+# from IPython.core.debugger import Tracer; Tracer(colors="Linux")()
