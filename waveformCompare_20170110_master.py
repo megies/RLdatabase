@@ -109,51 +109,6 @@ class RotationalProcessingException(Exception):
     """
     pass
 
-def data_from_file(net, sta, loc, chan, starttime, endtime):
-    """
-    Fetches seismogram data from mseed-file in a directory given by a path
-    (DFM_dir).
-
-    :type net: str
-    :param net: Network code, e.g. ``'BW'``.
-    :type sta: str)
-    :param sta: Station code, e.g. ``'PFORL'``.
-    :type loc: str
-    :param loc: Location code, e.g. ``'01'``. Location code may
-        contain wild cards.
-    :type chan: str
-    :param chan: Channel code, e.g. ``'BJZ.D'``. Channel code may
-        contain wild cards.
-    :type starttime: :class: `~obspy.core.utcdatetime.UTCDateTime`
-    :param starttime: Starttime of the fetched seismogram.
-    :type endtime: :class: `~obspy.core.utcdatetime.UTCDateTime`
-    :param endtime: Endtime of the fetched seismogram.
-    :return: Stream object :class: `~obspy.core.stream.Stream`
-    """
-
-    DFM_dir = "/home/johannes/waveformCompare/PFORL"  # directory of PFO data
-    st = Stream()
-
-    date = starttime
-    while date <= endtime:
-        print('Loading day %s ' % date.strftime("%d.%m"))
-        print('PFO digital demodulated.')
-        mseed_file = "%s/%s.%s..%s.%s.%s" % \
-            (DFM_dir, net, sta, chan, date.strftime("%Y"), date.strftime("%j"))
-
-        if os.path.exists(mseed_file):
-            try:
-                st += read(mseed_file)
-                print('Reading day %s successful!' % date.strftime("%Y.%m.%d"))
-            except IOError:
-                print('File not available for %s.' % date.strftime("%Y.%m.%d"))
-        else:
-            print('You chose a wrong path or the file does not exist!')
-        date = date + 24 * 3600.
-
-    return st
-
-
 def download_data(origin_time, net, sta, loc, chan, source):
     """
     It downloads the data from seismic stations for the desired event(s).
@@ -290,6 +245,7 @@ def event_info_data(event, station, mode, polarity, instrument):
         chan3 = 'BHN'
         chan4 = 'BHZ'
 
+        # for timespan when STS2 down
         if instrument == 'LENNARTZ':
             net_s = 'BW'
             sta_S = 'WETR'
@@ -311,27 +267,27 @@ def event_info_data(event, station, mode, polarity, instrument):
             ca.stats['starttime'] = startev - 180
             ca.stats['sampling_rate'] = 20.
 
-    elif station == 'PFO':
+    elif station == 'ROMY':
         net_r = 'BW'
-        net_s = 'I*'
-        sta_r = 'PFORL'
-        sta_s = 'PFO'
-        chan1 = 'BJZ.D'
+        net_s = 'GR'
+        sta_r = 'ROMY'
+        sta_s = 'FUR'
+        chan1 = 'BJZ'
         chan2 = 'BHE'
         chan3 = 'BHN'
         chan4 = 'BHZ'
         source = 'http://erde.geophysik.uni-muenchen.de'
-        rt = data_from_file(net_r, sta_r, '', chan1, startev - 180,
-                            startev + 3 * 3600)
-        rt[0].stats.coordinates = AttribDict()
-        rt[0].stats.coordinates['longitude'] = -116.453611
-        rt[0].stats.coordinates['latitude'] = 33.606389
-        rt[0].stats['starttime'] = startev - 180
-        rt[0].stats['sampling_rate'] = 20.
-        c = arclinkClient(user='test@obspy.org')
-        ac = c.get_waveforms(network=net_s, station=sta_s, location='00',
-                             channel='BH*', starttime=startev - 180,
-                             endtime=startev + 3 * 3600, attach_response=True)
+        rt = download_data(startev, net_r, sta_r, loc_r, chan1, source)
+        acE = download_data(startev, net_s, sta_s, loc_s, chan2, source)
+        acN = download_data(startev,  net_s, sta_s, loc_s, chan3, source)
+        acZ = download_data(startev,  net_s, sta_s, loc_s, chan4, source)
+        ac = Stream(traces=[acE[0], acN[0], acZ[0]])
+        for ca in [ac[0], ac[1], ac[2], rt[0]]:
+            ca.stats.coordinates = AttribDict()
+            ca.stats.coordinates['longitude'] = 11.275476
+            ca.stats.coordinates['latitude'] = 48.162941
+            ca.stats['starttime'] = startev - 180
+            ca.stats['sampling_rate'] = 20.
 
 
 
@@ -577,7 +533,7 @@ def remove_instr_resp(rt, ac, rt_pcoda, ac_pcoda, station, startev):
             displacement.simulate(paz_remove=paz_sts2_displacement, 
                                                         remove_sensitivity=True)
 
-    else:
+    elif station == 'ROMY':
         rt[0].data = rt[0].data * 1. / 2.5284 * 1e-3  # Rotation rate in nrad/s
         rt_pcoda[0].data = rt_pcoda[0].data * 1. / 2.5284 * 1e-3  # Rotation
         # rate in nrad/s
@@ -598,6 +554,31 @@ def remove_instr_resp(rt, ac, rt_pcoda, ac_pcoda, station, startev):
         # to nm/s^2
         for traza in (ac + ac_pcoda):
             traza.data = 1e9 * traza.data
+
+
+    elif station == 'PFO':
+        rt[0].data = rt[0].data * 1. / 2.5284 * 1e-3  # Rotation rate in nrad/s
+        rt_pcoda[0].data = rt_pcoda[0].data * 1. / 2.5284 * 1e-3  # Rotation
+        # rate in nrad/s
+        ac.detrend(type='linear')
+        ac_pcoda.detrend(type='linear')
+
+        displacement = ac.copy()
+        # TAPER
+        ac.taper(max_percentage=0.05)
+        rt.taper(max_percentage=0.05)
+
+        ac.remove_response(output='ACC', pre_filt=(0.005, 0.006, 30., 35.))
+        displacement.remove_response(output='DISP', 
+                                            pre_filt=(0.005, 0.006, 30., 35.))
+        ac_pcoda.remove_response(output='VEL',
+                                 pre_filt=(0.005, 0.006, 30., 35.))
+
+        # to nm/s^2
+        for traza in (ac + ac_pcoda):
+            traza.data = 1e9 * traza.data
+
+
 
     # make sure start and endtimes match for both instruments
     startaim = max([tr.stats.starttime for tr in (ac + rt)])
@@ -1441,13 +1422,6 @@ def store_info_xml(folder_name,tag_name,station):
     # creating a nested dictionary for parameters
     cat[0].extra = AttribDict()
 
-    cat[0].extra['rotational_parameters_{}'.format(station)] = AttribDict()
-    cat[0].extra['rotational_parameters_{}'.format(station)].value\
-                                                                 = AttribDict()
-    cat[0].extra['rotational_parameters_{}'.format(station)].namespace = ns
-
-
-
     params = AttribDict()
     params.namespace = ns
     params.value = AttribDict()
@@ -1466,14 +1440,8 @@ def store_info_xml(folder_name,tag_name,station):
     params.value.peak_correlation_coefficient.namespace = ns
     params.value.peak_correlation_coefficient.value = RP_list[2]
   
-    # for name, item in params.value.items():
-    #     cat[0].extra[name] = item
-    # cat[0].extra['rotational_parameters_{}'.format(station)] = params
-
-    for name,item in params.value.items():
-        cat[0].extra['rotational_parameters_{}'.format(station)]\
-                                                        ['value'][name]=item
-
+    cat[0].extra['rotational_parameters_{}'.format(station)] = {'namespace': ns,
+                                                                'value': params}
 
     cat.write(filename_xml,"QUAKEML",nsmap={"rotational_seismology_database": 
                                     r"http://www.rotational-seismology.org"})
