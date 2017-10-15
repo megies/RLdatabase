@@ -40,7 +40,7 @@ root_path = 'http://127.0.0.1:8000/rest/'
 authority = ('chow','chow')
 
 # folder with stataionXML files, quakeml files
-sta_path = './stationXMLs/'
+sta_path = './station_files/'
 eve_path = '/path/to/OUTPUT/'
 
 # actions
