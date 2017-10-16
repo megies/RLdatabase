@@ -1395,7 +1395,6 @@ def store_info_xml(folder_name,tag_name,station):
 
     # creating a nested dictionary for parameters
     params = AttribDict()
-    params.namespace = ns
     params.value = AttribDict()
 
     params.value.epicentral_distance = AttribDict()
@@ -1411,7 +1410,7 @@ def store_info_xml(folder_name,tag_name,station):
     params.value.peak_correlation_coefficient = AttribDict()
     params.value.peak_correlation_coefficient.namespace = ns
     params.value.peak_correlation_coefficient.value = RP_list[2]
-  
+    
     cat[0].extra['rotational_parameters_{}'.format(station)] = {'namespace': ns,
                                                                 'value': params}
 
@@ -1569,8 +1568,8 @@ def plotWaveformComp(event, station, link, mode, event_source, folder_name,
                 ax.axis('off')
 
                 plt.subplot2grid((4, 9), (3, 0), colspan=2)
-                plt.title(u'Event Information: \n Global Centroid-Moment-Tensor '
-                          'Catalog (GCMT)'
+                plt.title(u'Event Information: \n Global Centroid-Moment-Tensor'
+                          ' Catalog (GCMT)' 
                           '\n\n Processing Date:\n'+str(UTCDateTime().date),
                           fontsize=14)
                 ax = plt.gca()
@@ -1677,6 +1676,7 @@ def plotWaveformComp(event, station, link, mode, event_source, folder_name,
                 ax = plt.gca()
                 ax.axis('off')
 
+    # stations other than RLAS, not tested yet
     else:
         x, y = map(lonter, latter)
         statlon, statlat = map(rt[0].stats.coordinates.longitude, rt[0].stats.
@@ -1687,7 +1687,7 @@ def plotWaveformComp(event, station, link, mode, event_source, folder_name,
                                                                     zorder=100)
             map.scatter(statlon, statlat, 700, color="b", marker="v",
                                                     edgecolor="k", zorder=100)
-            plt.text(statlon + 27000, statlat, 'PFO', fontsize=18, va="top",
+            plt.text(statlon + 27000, statlat, station, fontsize=18, va="top",
                                 family="monospace", weight="bold", zorder=101,
                                  color='k', backgroundcolor='white')
         elif is_local(baz) == 'non-local':
@@ -1695,7 +1695,7 @@ def plotWaveformComp(event, station, link, mode, event_source, folder_name,
                                                                      zorder=100)
             map.scatter(statlon, statlat, 300, color="b", marker="v",
                                                     edgecolor="k", zorder=100)
-            plt.text(statlon + 200000, statlat, 'PFO', va="top",
+            plt.text(statlon + 200000, statlat, station, va="top",
                                 family="monospace", weight="bold", zorder=101,
                                 color='k', backgroundcolor='white')
         else:
@@ -1703,7 +1703,7 @@ def plotWaveformComp(event, station, link, mode, event_source, folder_name,
                                                                      zorder=100)
             map.scatter(statlon, statlat, 400, color="b", marker="v",
                                                       edgecolor="k", zorder=100)
-            plt.text(statlon + 6000, statlat + 1000, 'PFO', va="top",
+            plt.text(statlon + 6000, statlat + 1000, station, va="top",
                                   family="monospace", weight="bold", zorder=101,
                              color='k', backgroundcolor='white', fontsize=18)
 
@@ -1766,13 +1766,15 @@ def plotWaveformComp(event, station, link, mode, event_source, folder_name,
 
 
     # test if ring laser signal is flipped, which happened a few times:
-    # st_rt = rt[0].data[int(rt[0].stats.sampling_rate*min_lwi):int(rt[0].stats.sampling_rate*max_lwi)]
+    # st_rt = rt[0].data[int(rt[0].stats.sampling_rate*min_lwi):int(
+                                        # rt[0].stats.sampling_rate*max_lwi)]
     # st_rt = st_rt/np.max(np.abs(st_rt))
-    # st_ac = rotate[1][int(rt[0].stats.sampling_rate*min_lwi):int(rt[0].stats.sampling_rate*max_lwi)]
+    # st_ac = rotate[1][int(rt[0].stats.sampling_rate*min_lwi):int(
+                                        # rt[0].stats.sampling_rate*max_lwi)]
     # st_ac = st_ac/np.max(np.abs(st_ac))
     # testCC = xcorr(st_rt, st_ac, shift_len=100, full_xcorr=True) 
 
-    # if testCC[1] < -0.8:  # if the CC is highly negative, the signal is flipped
+    # if testCC[1] < -0.8:  # if the CC is highly negative, signal is flipped
     #    rt[0].data = rt[0].data*(-1)  # if flipped, re-flip it!
 
     # Waveform comparison plot
