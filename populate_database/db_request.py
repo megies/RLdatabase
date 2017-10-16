@@ -82,7 +82,7 @@ elif action == 'delete':
 
     assert r.ok
 
-elif action == 'attach':
+elif action == 'attach' and pick == 'quakeml':
     content = input('content-type?: ')    
     category = input('category?: ')
     headers = {'content-type': '{}'.format(content),
@@ -101,8 +101,6 @@ elif action == 'attach':
             auth=authority,
             headers=headers,
             data=fh)
-
-    assert r.ok
 
     assert r.ok
 

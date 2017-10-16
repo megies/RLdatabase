@@ -1239,7 +1239,7 @@ def store_info_json(rotate, ac, rt, corrcoefs, baz, arriv_p, EBA, folder_name,
                     ('data source', source)
                     ])
                 ),
-                ('rotational_parameters'.format(station),
+                ('rotational_parameters',
                     OrderedDict([
                     ('epicentral_distance', distance),
                     ('epicentral_distance_unit', 'km'),
@@ -1256,7 +1256,7 @@ def store_info_json(rotate, ac, rt, corrcoefs, baz, arriv_p, EBA, folder_name,
                     ('transverse_acceleration_SNR', SNT),
                     ])
                 ),
-                ('phase_velocities'.format(station), 
+                ('phase_velocities', 
                     OrderedDict([
                     ('band_1', 
                         OrderedDict([
@@ -1383,7 +1383,7 @@ def store_info_xml(folder_name,tag_name,station):
     RP_list = []
     for RP in rotational_parameters:
         RP_list.append(data['station_information_{}'.format(station)]
-                                            ['rotational_parameters'][RP])
+                                                ['rotational_parameters'][RP])
 
     cat = read_events(pathname_or_url=filename_xml, format='QUAKEML')
     
