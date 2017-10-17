@@ -1395,21 +1395,20 @@ def store_info_xml(folder_name,tag_name,station):
 
     # creating a nested dictionary for parameters
     params = AttribDict()
-    params.value = AttribDict()
 
-    params.value.epicentral_distance = AttribDict()
-    params.value.epicentral_distance.namespace = ns
-    params.value.epicentral_distance.value = RP_list[0]
-    params.value.epicentral_distance.attrib = {'unit':"km"}
+    params.epicentral_distance = AttribDict()
+    params.epicentral_distance.namespace = ns
+    params.epicentral_distance.value = RP_list[0]
+    params.epicentral_distance.attrib = {'unit':"km"}
 
-    params.value.theoretical_backazimuth = AttribDict()
-    params.value.theoretical_backazimuth.namespace = ns
-    params.value.theoretical_backazimuth.value = RP_list[1]
-    params.value.theoretical_backazimuth.attrib = {'unit':"degree"}
+    params.theoretical_backazimuth = AttribDict()
+    params.theoretical_backazimuth.namespace = ns
+    params.theoretical_backazimuth.value = RP_list[1]
+    params.theoretical_backazimuth.attrib = {'unit':"degree"}
 
-    params.value.peak_correlation_coefficient = AttribDict()
-    params.value.peak_correlation_coefficient.namespace = ns
-    params.value.peak_correlation_coefficient.value = RP_list[2]
+    params.peak_correlation_coefficient = AttribDict()
+    params.peak_correlation_coefficient.namespace = ns
+    params.peak_correlation_coefficient.value = RP_list[2]
     
     cat[0].extra['rotational_parameters_{}'.format(station)] = {'namespace': ns,
                                                                 'value': params}
