@@ -1370,46 +1370,40 @@ def store_info_xml(folder_name,tag_name,station):
     :param folder_name: Name of the folder containing the event.
     :type tag_name: string
     :param tag_name: Handle of the event.
+    :type station: str
+    :param station: Station from which data are fetched (i.e. 'RLAS').
     """
+
     ns = 'http://www.rotational-seismology.org'
     filename_json = folder_name + tag_name + '.json'
     filename_xml = folder_name + tag_name + '.xml'
+
+    # check if xml already has extra section
+    cat = read_events(pathname_or_url=filename_xml, format='QUAKEML')
+    try:
+        cat[0].extra
+    except AttributeError:
+        cat[0].extra = AttribDict()
 
     # grab data from json file
     data = json.load(open(filename_json))
     rotational_parameters = ['epicentral_distance',
                              'theoretical_backazimuth',
                              'peak_correlation_coefficient']
-    RP_list = []
-    for RP in rotational_parameters:
-        RP_list.append(data['station_information_{}'.format(station)]
-                                                ['rotational_parameters'][RP])
-
-    cat = read_events(pathname_or_url=filename_xml, format='QUAKEML')
     
-    # check if xml already has extra section
-    try:
-        cat[0].extra
-    except AttributeError:
-        cat[0].extra = AttribDict()
-
-    # creating a nested dictionary for parameters
+    # write parameters from json into attribute dictionaries
     params = AttribDict()
+    for RP in rotational_parameters:
+        RP_value = (data['station_information_{}'.format(station)]
+                                                ['rotational_parameters'][RP])
+        params[RP] = AttribDict()
+        params[RP] = {'namespace':ns,
+                      'value': RP_value}
 
-    params.epicentral_distance = AttribDict()
-    params.epicentral_distance.namespace = ns
-    params.epicentral_distance.value = RP_list[0]
+    # set unit attributes
     params.epicentral_distance.attrib = {'unit':"km"}
-
-    params.theoretical_backazimuth = AttribDict()
-    params.theoretical_backazimuth.namespace = ns
-    params.theoretical_backazimuth.value = RP_list[1]
     params.theoretical_backazimuth.attrib = {'unit':"degree"}
 
-    params.peak_correlation_coefficient = AttribDict()
-    params.peak_correlation_coefficient.namespace = ns
-    params.peak_correlation_coefficient.value = RP_list[2]
-    
     cat[0].extra['rotational_parameters_{}'.format(station)] = {'namespace': ns,
                                                                 'value': params}
 
@@ -1587,7 +1581,7 @@ def plotWaveformComp(event, station, link, mode, event_source, folder_name,
 
                 plt.subplot2grid((4, 9), (2, 0), colspan=2)
                 if reg==True:
-                    plt.title(u'\n\nRegion: %s \n\nMagnitude: %s \n\nDistance: %.2f [km] - %.2f [°]\n\nDepth: %.2f [km]'
+                    plt.title(u'\n\nRegion: %s \n\nMagnitude: %s \n\nDistance: %.2f [km], %.2f [°]\n\nDepth: %.2f [km]'
                               % (region, str(event).split('\n')[0][57:64], 0.001 * baz[0],
                                  0.001 * baz[0] / 111.11, depth),
                                 fontsize=18, fontweight='bold')
@@ -1630,7 +1624,7 @@ def plotWaveformComp(event, station, link, mode, event_source, folder_name,
 
                 plt.subplot2grid((4, 9), (2, 0), colspan=2)
 
-                plt.title(u'\nMagnitude: %s \n\nDistance: %.2f [km] - %.2f [°]'
+                plt.title(u'\nMagnitude: %s \n\nDistance: %.2f [km], %.2f [°]'
                           '\n\nDepth: %.2f [km]'
                           % (str(event).split('\n')[0][57:64], 0.001 * baz[0],
                              0.001 * baz[0] / 111.11, depth), fontsize=18,
@@ -1655,12 +1649,12 @@ def plotWaveformComp(event, station, link, mode, event_source, folder_name,
 
                 plt.subplot2grid((4, 9), (2, 0), colspan=2)
                 if reg==True:
-                    plt.title(u'\n\nRegion: %s \n\nMagnitude: %s \n\nDistance: %.2f [km] - %.2f [°]\n\nDepth: %.2f [km]'
+                    plt.title(u'\n\nRegion: %s \n\nMagnitude: %s \n\nDistance: %.2f [km], %.2f [°]\n\nDepth: %.2f [km]'
                               % (region, str(event).split('\n')[0][57:64], 0.001 * baz[0],
                                  0.001 * baz[0] / 111.11, depth),
                                                  fontsize=18, fontweight='bold')
                 else:
-                    plt.title(u'\nMagnitude: %s \n\nDistance: %.2f [km] - %.2f [°]'
+                    plt.title(u'\nMagnitude: %s \n\nDistance: %.2f [km], %.2f [°]'
                               '\n\nDepth: %.2f [km]'
                               % (str(event).split('\n')[0][57:64], 0.001 * baz[0],
                                  0.001 * baz[0] / 111.11, depth), 
@@ -1715,12 +1709,12 @@ def plotWaveformComp(event, station, link, mode, event_source, folder_name,
 
         plt.subplot2grid((4, 9), (3, 0), colspan=2)
         if reg==True:
-            plt.title(u'\n\nRegion: %s \n\nMagnitude: %s \n\nDistance: %.2f [km] - %.2f [°]\n\nDepth: %.2f [km]'
+            plt.title(u'\n\nRegion: %s \n\nMagnitude: %s \n\nDistance: %.2f [km], %.2f [°]\n\nDepth: %.2f [km]'
                       % (region, str(event).split('\n')[0][57:64], 0.001 * baz[0],
                          0.001 * baz[0] / 111.11, depth),
                       fontsize=18, fontweight='bold')
         else:
-            plt.title(u'\nMagnitude: %s \n\nDistance: %.2f [km] - %.2f [°]'
+            plt.title(u'\nMagnitude: %s \n\nDistance: %.2f [km], %.2f [°]'
                       '\n\nDepth: %.2f [km]'
                       % (str(event).split('\n')[0][57:63], 0.001 * baz[0],
                          0.001 * baz[0] / 111.11, depth), fontsize=18,
@@ -1807,16 +1801,16 @@ def plotWaveformComp(event, station, link, mode, event_source, folder_name,
     bbox_props = dict(boxstyle="square, pad=0.3", fc='white')
     plt.axvline(x=min_pw, linewidth=1)
     plt.annotate('1', xy=(min_pw+xgap, box_yposition), fontsize=14,
-                 fontweight='bold', bbox=bbox_props)
+                                            fontweight='bold', bbox=bbox_props)
     plt.axvline(x=min_sw, linewidth=1)
     plt.annotate('2', xy=(min_sw+xgap, box_yposition), fontsize=14,
-                 fontweight='bold', bbox=bbox_props)
+                                            fontweight='bold', bbox=bbox_props)
     plt.axvline(x=min_lwi, linewidth=1)
     plt.annotate('3', xy=(min_lwi+xgap, box_yposition), fontsize=14,
-                 fontweight='bold', bbox=bbox_props)
+                                            fontweight='bold', bbox=bbox_props)
     plt.axvline(x=min_lwf, linewidth=1)
     plt.annotate('4', xy=(min_lwf+xgap, box_yposition), fontsize=14,
-                 fontweight='bold', bbox=bbox_props)
+                                            fontweight='bold', bbox=bbox_props)
     plt.title(r'Ring laser and broadband seismometer recordings. Event: %s %s'
               % (startev.date, startev.time))
     plt.grid(True)
