@@ -1206,7 +1206,7 @@ def store_info_json(rotate, ac, rt, corrcoefs, baz, arriv_p, EBA, folder_name,
     dic_event = OrderedDict([
                 ('event_id',event.resource_id.id),
                 ('event_source',event_source),
-                ('starttime',str(startev)),
+                ('origin_time',str(startev)),
                 ('trace_start',str(startev-180)),
                 ('trace_end',str(startev+3*3600)),
                 ('magnitude',magnitude),
@@ -1246,7 +1246,7 @@ def store_info_json(rotate, ac, rt, corrcoefs, baz, arriv_p, EBA, folder_name,
                     ('epicentral_distance_unit', 'km'),
                     ('theoretical_backazimuth', TBA),
                     ('estimated_backazimuth', EBA),
-                    ('backazimuth_unit', 'degree'),
+                    ('backazimuth_unit', 'degrees'),
                     ('max_xcoef_for_estimated_backazimuth', max_ebaz_xcoef),
                     ('peak_vertical_rotation_rate', PRZ),
                     ('peak_vertical_rotation_rate_unit', 'nrad/s'),
@@ -2379,7 +2379,6 @@ if __name__ == '__main__':
 
             # i.e. './OUTPUT/GCMT_2017-09-23T125302_6.05_OAXACA_MEXICO/
             folder_name = os.path.join(output_path,tag_name) + '/'
-
 
             # check if event already processed by checking json file,
             # if new station, run waveform compare
