@@ -1206,8 +1206,9 @@ def store_info_json(rotate, ac, rt, corrcoefs, baz, arriv_p, EBA, folder_name,
     dic_event = OrderedDict([
                 ('event_id',event.resource_id.id),
                 ('event_source',event_source),
-                ('starttime',str(startev-180)),
-                ('endtime',str(startev+3*3600)),
+                ('starttime',str(startev)),
+                ('trace_start',str(startev-180)),
+                ('trace_end',str(startev+3*3600)),
                 ('magnitude',magnitude),
                 ('depth',depth),
                 ('depth_unit','km')
@@ -2354,7 +2355,7 @@ if __name__ == '__main__':
             event_information = str(event).split('\n')[0][7:]
             flinn_engdahl = event.event_descriptions[0]['text']
             print('{}\n{}\n{}\n{}'.format(
-                                        bars,flinn_engdahl,event_information,bars))
+                                    bars,flinn_engdahl,event_information,bars))
 
             # create tags for standard filenaming
             # magnitude, always keep at 3 characters long, fill w/ 0's if not
@@ -2370,8 +2371,8 @@ if __name__ == '__main__':
                 flinn_engdahl = flinn_engdahl[:-1]
 
             # ISO861 Time Format, i.e. '2017-09-23T125302Z'
-            time_tag = event.origins[0]['time'].isoformat(
-                                                )[:19].replace(':','')+'Z'
+            orig = event.preferred_origin() or event.origins[0]
+            time_tag = orig['time'].isoformat()[:19].replace(':','')+'Z'
 
             # i.e. 'GCMT_2017-09-23T125302_6.05_OAXACA_MEXICO'
             tag_name = '_'.join((catalog,time_tag,mag_tag,flinn_engdahl))
