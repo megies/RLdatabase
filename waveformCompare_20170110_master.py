@@ -2300,8 +2300,9 @@ if __name__ == '__main__':
         print('\nDownloading events from QuakeML')
         quakeml = './populate_database/extra_events.xml'
         cat = read_events(quakeml, format='QUAKEML')
-        event_source = "ISC_"
-        catalog='ISC_'
+        event_source = "ISC"
+        catalog='ISC'
+        
     elif mode == 'fdsn':
         print('\nDownloading events from IRIS')
         catalog='GCMT'
