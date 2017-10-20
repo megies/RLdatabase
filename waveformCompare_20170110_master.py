@@ -136,15 +136,9 @@ def download_data(origin_time, net, sta, loc, chan, source):
     #                          channel=chan,
     #                          starttime=origin_time-190,
     #                          endtime=origin_time+3*3600+10)
+    
     try:
-        print("Fetching data from FDSN client service")
-        c = fdsnClient(source)
-        st = c.get_waveforms(network=net, station=sta, location='', 
-                            channel=chan, starttime=origin_time-190,
-                            endtime=origin_time+3*3600+10)
-
-    except:
-        print("\tFailed, fetching data from file")
+        print("Fetching data from file")
         dataDir_get = '/bay200/mseed_online/archive/'
         # dataDir_get = '/import/netapp-m-02-bay200/mseed_online/archive/' # LMU
 
@@ -173,6 +167,15 @@ def download_data(origin_time, net, sta, loc, chan, source):
         else:
             st = None
             print("\tFile not found: \n\t %s \n" % filePath)
+    
+    except:
+        print("\tFetching data from FDSN client service")
+        c = fdsnClient(source)
+        st = c.get_waveforms(network=net, station=sta, location='', 
+                            channel=chan, starttime=origin_time-190,
+                            endtime=origin_time+3*3600+10)
+
+   
 
         if not st:
             raise RotationalProcessingException('Data not available for this'
