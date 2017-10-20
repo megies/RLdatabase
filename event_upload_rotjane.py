@@ -97,12 +97,18 @@ for event in cat:
                 url=root_path + 'documents/quakeml/{}'.format(xml),
                 auth=authority)
             assert r2.ok
-            att_count = r2.json()['indices'][0]['attachments_count']
 
-            if att_count == 5:
-                os.chdir('..')
-                continue
-            elif att_count != 5:
+            try:
+                att_count = r2.json()['indices'][0]['attachments_count']
+                if att_count == 5:
+                    os.chdir('..')
+                    continue
+                elif att_count != 5:
+                    error_list.append(event)
+                    error_type.append('Already Uploaded; Attachment Count Error')
+                    os.chdir('..')
+                    continue
+            except IndexError:
                 error_list.append(event)
                 error_type.append('Already Uploaded; Attachment Count Error')
                 os.chdir('..')
@@ -154,25 +160,33 @@ for event in cat:
         r_del = requests.delete(
                 url=root_path + 'documents/quakeml/{}'.format(xml),
                 auth=authority)
-        error_list.append(event)
-        error_type.append(r.content)
+
+        # tag errors for errolog
+        error_list.append(os.path.basename(event))
+        error_type.append(str(r.status_code) + ' ' + r.json()['reason'])
         os.chdir('..')
         continue
 
-# write error log to txt file to see what files failed, timestamp for uniqueness
+# write error log to txt file to see what failed
 if len(error_list) > 0:
+    os.chdir('../upload_errorlogs')
     timestamp = datetime.datetime.now()
-    JD = timestamp.day
-    H = timestamp.hour
-    M = timestamp.minute
-    S = timestamp.minute
-    with open('errorlog_{}-{}{}{}.txt'.format(JD,H,M,S),'w') as f:
-        f.write('Error Log Created on {}\n'.format(timestamp))
+    M = timestamp.month
+    Y = timestamp.year
+    mode = 'w'
+    log_name = 'errorlog_{}_{}.txt'.format(M,Y)
+
+    # check if file exists
+    if os.path.exists(log_name):
+        mode = 'a+'
+
+    with open(log_name,mode) as f:
+        f.write('Error Log Created {}\n'.format(timestamp))
         for i in range(len(error_list)):
-            f.write('{}\t{}\n'.format(error_list[i],error_type[i]))
-    print('Created '+'errorlog_{}-{}{}{}.txt'.format(JD,H,M,S) +
-            ' with {} errors'.format(len(error_list)))
+           f.write('{}\n> {}\n'.format(error_list[i],error_type[i]))
+        f.write('{}\n'.format('='*80)) 
 
 
+    print('Logged {} error(s)'.format(len(error_list)))
 
-# from IPython.core.debugger import Tracer; Tracer(colors="Linux")()
+

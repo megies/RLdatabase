@@ -1,4 +1,4 @@
-# normal script operation, half a year at a time (with exceptions)
+# normal script operation, half a year at a time (with exceptions), stops accumulating Oct. 15, 2017
 python ../waveformCompare_20170110_master.py --min_datetime 2007-07-18T00:00 --max_datetime 2007-09-13T23:59 --mode fdsn
 python ../waveformCompare_20170110_master.py --min_datetime 2007-09-26T00:00 --max_datetime 2007-12-15T23:59 --mode fdsn
 python ../waveformCompare_20170110_master.py --min_datetime 2007-12-26T23:00 --max_datetime 2008-02-20T23:59 --mode fdsn
@@ -18,7 +18,11 @@ python ../waveformCompare_20170110_master.py --min_datetime 2014-01-01T00:00 --m
 python ../waveformCompare_20170110_master.py --min_datetime 2014-11-16T00:00 --max_datetime 2014-12-31T23:59 --mode fdsn
 python ../waveformCompare_20170110_master.py --min_datetime 2015-01-01T00:00 --max_datetime 2015-06-30T23:59 --mode fdsn
 python ../waveformCompare_20170110_master.py --min_datetime 2015-07-01T00:00 --max_datetime 2015-12-31T23:59 --mode fdsn
-python ../waveformCompare_20170110_master.py --min_datetime 2016-01-01T00:00 --max_datetime 2016-08-02T23:59 --mode fdsn
+python ../waveformCompare_20170110_master.py --min_datetime 2016-01-01T00:00 --max_datetime 2016-06-30T23:59 --mode fdsn
+python ../waveformCompare_20170110_master.py --min_datetime 2016-07-01T00:00 --max_datetime 2016-12-31T23:59 --mode fdsn
+python ../waveformCompare_20170110_master.py --min_datetime 2017-01-01T00:00 --max_datetime 2017-06-30T23:59 --mode fdsn
+python ../waveformCompare_20170110_master.py --min_datetime 2017-07-01T00:00 --max_datetime 2017-10-15T23:59 --mode fdsn
+
 
 # flipped polarities
 # decided not to flip polarities as it will be interesting to filter by negative correlation, leaving calls to show time periods

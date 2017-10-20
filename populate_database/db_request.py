@@ -9,10 +9,11 @@ import requests
 import argparse
 
 # command line arguments
-parser = argparse.ArgumentParser(description='Database interaction script for'
-    'adding stations, individual events, attaching individual attachments,'
-    'deleting stations and events or choosing the nuclear option and wiping the'
-    'database clean. All arguments needed except for wipe.',formatter_class=argparse.RawTextHelpFormatter)
+parser = argparse.ArgumentParser(description='Database interaction script for '
+    'adding stations, individual events, attaching individual attachments, '
+    'deleting stations and events or choosing the nuclear option and wiping '
+    'the database clean. All arguments needed except for wipe.',
+    formatter_class=argparse.RawTextHelpFormatter)
 parser.add_argument('--action', help='Performable actions:\n\
     get: return all XML information\n\
     put: upload a XML file\n\
@@ -23,6 +24,7 @@ parser.add_argument('--pick',help='Choose [stationxml] or [quakeml]',type=str,
                                                                 default='blank')
 parser.add_argument('--fileid', help='Filename for object as input,\n' 
     'If [all], will post all stationxml files to database.\n'
+    'Does not require file extension.\n'
     'For mass event upload, use event_upload_rotjane.py',
                                                     type=str,default='blank')
 args = parser.parse_args()
@@ -41,7 +43,7 @@ authority = ('chow','chow')
 
 # folder with stataionXML files, quakeml files
 sta_path = './station_files/'
-eve_path = '/path/to/OUTPUT/'
+eve_path = '../OUTPUT/'
 
 # actions
 if action == 'get':
@@ -64,9 +66,10 @@ elif action == 'put':
                 url=root_path + 'documents/{}/{}'.format(pick,sta_name),
                 auth=authority,
                 data=fh)
-
+    # put quakeml
     else:
-        with open(filename,'rb') as fh:
+        xml_path = os.path.join(eve_path,filename,filename+'.xml')
+        with open(xml_path,'rb') as fh:
             r = requests.put(
                 url=root_path + 'documents/{}/{}'.format(pick,filename),
                 auth=authority,
@@ -76,11 +79,17 @@ elif action == 'put':
 
 
 elif action == 'delete':
+    # allow for more flexible file id
+    if filename[-4:] != '.xml':
+        filename += '.xml'
     r = requests.delete(
             url=root_path + 'documents/{}/{}'.format(pick,filename),
             auth=authority)
 
     assert r.ok
+    
+
+
 
 elif action == 'attach' and pick == 'quakeml':
     content = input('content-type?: ')    
@@ -110,11 +119,9 @@ elif action == 'wipe':
     if wipe == 'yes' and pick == 'quakeml':
         filelist = glob.glob(eve_path + 'GCMT*') + glob.glob(eve_path + 'ISC*')
         filenames = ['{}.xml'.format(_[len(eve_path):]) for _ in filelist]
-        a=1/0
     elif wipe == 'yes' and pick == 'stationxml':
         filelist = glob.glob(sta_path + '*')
         filenames = [_[len(sta_path):] for _ in filelist]   
-        a=1/0 
     else:
         sys.exit('Aborting')
 
