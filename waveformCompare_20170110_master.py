@@ -2302,7 +2302,7 @@ if __name__ == '__main__':
         cat = read_events(quakeml, format='QUAKEML')
         event_source = "ISC"
         catalog='ISC'
-        
+
     elif mode == 'fdsn':
         print('\nDownloading events from IRIS')
         catalog='GCMT'
@@ -2353,11 +2353,12 @@ if __name__ == '__main__':
     print('%i event(s) downloaded, beginning processing...' % len(cat))
     contador1 = contador2 = contador3 = 0
     bars = '='*79
+    error_list,error_type = [],[] 
     for event in cat:
         try:
             # print event divider
             event_information = str(event).split('\n')[0][7:]
-            flinn_engdahl = event.event_descriptions[0]['text']
+            flinn_engdahl = event.event_descriptions[0]['text'].upper()
             print('{}\n{}\n{}\n{}'.format(
                                     bars,flinn_engdahl,event_information,bars))
 
@@ -2398,12 +2399,21 @@ if __name__ == '__main__':
                             plotWaveformComp(event, station, link, mode,
                                             event_source, folder_name, tag_name)
                             contador2 += 1
+
+                        # if any error, remove folder, continue
                         except Exception as e:
                             contador3 += 1
                             print(e)
                             print('Removing incomplete folder...\n')
                             shutil.rmtree(folder_name)
 
+                        # if keyboard interrupt, remove folder, quit
+                        except KeyboardInterrupt:
+                            print('Removing incomplete folder...\n')
+                            shutil.rmtree(folder_name)
+                            sys.exit()
+
+                # if json not found, folder is incomplete, continue
                 except FileNotFoundError:
                     print('Incomplete folder found\n')
                     contador1 += 1 
@@ -2413,16 +2423,26 @@ if __name__ == '__main__':
             elif not os.path.exists(str(folder_name)):  
                 os.makedirs(str(folder_name))
                 event.write(folder_name + tag_name + '.xml', format="QUAKEML")
+
+                # run processing function
                 try:
                     plotWaveformComp(event, station, link, mode,
                                         event_source, folder_name, tag_name)
                     contador2 += 1
+                
+                # if any error, remove folder, continue
                 except Exception as e:
                     contador3 += 1
                     print(e)
                     print('Removing incomplete folder...\n')
                     shutil.rmtree(folder_name)
-                            
+               
+                # if keyboard interrupt, remove folder, quit
+                except KeyboardInterrupt:
+                    print('Removing incomplete folder...\n')
+                    shutil.rmtree(folder_name)
+                    sys.exit()
+
         except Exception as e:
             print('Exception: ',e)
 
@@ -2431,6 +2451,7 @@ if __name__ == '__main__':
     print('From a total of %i event(s):\n %i was/were successfully processed'
           '\n %i could not be processed \n %i already processed\n' % (
               len(cat), contador2, contador3, contador1))
+
 
 
 # DEBUGGER
