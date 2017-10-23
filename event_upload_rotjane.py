@@ -156,14 +156,18 @@ for event in cat:
 
     except AssertionError:
         # if assertion fails for any reason, delete current folder
-        print(r.content)
+        print(r.content.decode('UTF-8'))
         r_del = requests.delete(
                 url=root_path + 'documents/quakeml/{}'.format(xml),
                 auth=authority)
 
         # tag errors for errolog
         error_list.append(os.path.basename(event))
-        error_type.append(str(r.status_code) + ' ' + r.json()['reason'])
+        try:
+            reason = r.json()['reason']
+        except Exception:
+            reason = ''
+        error_type.append(str(r.status_code) + ' ' + reason)
         os.chdir('..')
         continue
 
@@ -182,9 +186,10 @@ if len(error_list) > 0:
 
     with open(log_name,mode) as f:
         f.write('Error Log Created {}\n'.format(timestamp))
+        f.write('{}\n'.format('='*79)) 
         for i in range(len(error_list)):
            f.write('{}\n> {}\n'.format(error_list[i],error_type[i]))
-        f.write('{}\n'.format('='*80)) 
+        f.write('{}\n'.format('='*79)) 
 
 
     print('Logged {} error(s)'.format(len(error_list)))

@@ -53,7 +53,7 @@ if action == 'get':
             auth=authority)
 
     assert r.ok
-    print(r.content)
+    print(r.content.decode('UTF-8'))
 
 elif action == 'put':
     if filename == 'all' and pick == 'stationxml':
@@ -79,7 +79,7 @@ elif action == 'put':
 
 
 elif action == 'delete':
-    # allow for more flexible file id
+    # allow for more flexible file id inputs
     if filename[-4:] != '.xml':
         filename += '.xml'
     r = requests.delete(
@@ -88,8 +88,6 @@ elif action == 'delete':
 
     assert r.ok
     
-
-
 
 elif action == 'attach' and pick == 'quakeml':
     content = input('content-type?: ')    
@@ -125,7 +123,7 @@ elif action == 'wipe':
     else:
         sys.exit('Aborting')
 
-    for filename in filelist:
+    for filename in filenames:
         try:
             r = requests.delete(
                     url=root_path + 'documents/{}/{}'.format(pick,filename),

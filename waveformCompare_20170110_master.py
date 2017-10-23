@@ -2444,7 +2444,7 @@ if __name__ == '__main__':
                     sys.exit()
 
         except Exception as e:
-            print('Exception: ',e)
+            print('Error in folder/tag name creation; ',e)
 
     print('{}\n'.format('_'*79))
     print('Catalog complete, no more events to show')
