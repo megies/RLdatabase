@@ -54,6 +54,7 @@ elif timespan == 'all':
 
 error_list,error_type = [],[]
 for event in cat:
+    print(os.path.basename(event))
     try:
         os.chdir(event)
         attachments = glob.glob('*')

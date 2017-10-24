@@ -129,6 +129,7 @@ elif action == 'wipe':
                     url=root_path + 'documents/{}/{}'.format(pick,filename),
                     auth=authority)
             assert r.ok
+            print(os.path.basename(filename))
         except AssertionError:
             continue
        

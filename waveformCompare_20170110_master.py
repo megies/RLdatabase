@@ -137,11 +137,17 @@ def download_data(origin_time, net, sta, loc, chan, source):
     #                          starttime=origin_time-190,
     #                          endtime=origin_time+3*3600+10)
     
-    try:
+    # check to see if running on FFB, LMU or neither
+    st = None
+    dataDir_get = '/bay200/mseed_online/archive/' #FFB
+    if not os.path.exists(dataDir_get):
+        dataDir_get = '/import/netapp-m-02-bay200/mseed_online/archive/'#LMU            
+    if not os.path.exists(dataDir_get):
+        dataDir_get = None
+    
+    # if data path exists, read in data from file
+    if dataDir_get:
         print("Fetching data from file")
-        dataDir_get = '/bay200/mseed_online/archive/'
-        # dataDir_get = '/import/netapp-m-02-bay200/mseed_online/archive/' # LMU
-
         fileName = ".".join((net, sta, "." + chan + ".D",
                              origin_time.strftime("%Y.%j")))
         filePath = os.path.join(dataDir_get, origin_time.strftime("%Y"),
@@ -165,21 +171,28 @@ def download_data(origin_time, net, sta, loc, chan, source):
                 st = read(filePath, starttime = origin_time - 180,
                       endtime = origin_time + 3 * 3600)
         else:
-            st = None
-            print("\tFile not found: \n\t %s \n" % filePath)
+            print("\tFile not found: \n\t %s \n" % filePath)    
     
-    except:
-        print("\tFetching data from FDSN client service")
-        c = fdsnClient(source)
-        st = c.get_waveforms(network=net, station=sta, location='', 
-                            channel=chan, starttime=origin_time-190,
-                            endtime=origin_time+3*3600+10)
-
-   
-
-        if not st:
-            raise RotationalProcessingException('Data not available for this'
+    # if data/path does not exist, try querying FDSN webservices
+    elif (not dataDir_get) or (not st):
+        while not st:
+            for S in source:
+                try:
+                    print("Fetching {} data from FDSN ({})".format(sta,S))
+                    c = fdsnClient(S)
+                    st = c.get_waveforms(network=net, station=sta, location=loc, 
+                                        channel=chan, starttime=origin_time-190,
+                                        endtime=origin_time+3*3600+10)
+                    break
+                except:
+                    print('\tFailed')
+                    pass
+          
+       
+    if not st:
+        raise RotationalProcessingException('Data not available for this'
                                                                     ' event')
+        
     st.trim(starttime=origin_time-180, endtime=origin_time+3*3600)
 
     print('\tDownload of {!s} {!s} data successful'.format(
@@ -233,13 +246,16 @@ def event_info_data(event, station, mode, polarity, instrument):
     depth = origin.depth * 0.001  # Depth in km
 
     if station == 'RLAS':
-        source = 'http://erde.geophysik.uni-muenchen.de' #'LMU' or 'BGR'
+        source = ['BGR','LMU']
+        # source = ['http://eida.bgr.de', 
+        #           'http://erde.geophysik.uni-muenchen.de']
         net_r = 'BW'
         net_s = 'GR' 
         sta_r = 'RLAS'
         sta_s = 'WET'
         loc_r = ''
         loc_s = ''
+        # RLAS channel code was changed after 16.4.2010
         if origin.time < UTCDateTime(2010, 4, 16):
             chan1 = 'BAZ'
         else: 
@@ -253,8 +269,8 @@ def event_info_data(event, station, mode, polarity, instrument):
             net_s = 'BW'
             sta_S = 'WETR'
 
-        # ringlaser signal
-        rt = download_data(startev, net_r, sta_r, loc_r, chan1, source)
+        # ringlaser signal, source LMU first
+        rt = download_data(startev, net_r, sta_r, loc_r, chan1, source[::-1])
         if polarity.lower() == 'reverse':
             rt[0].data *= -1
 
@@ -2240,7 +2256,7 @@ def plotWaveformComp(event, station, link, mode, event_source, folder_name,
 
     store_info_xml(folder_name,tag_name,station)
 
-    print('Completed and Saved')
+    print('Completed and Saved\n')
 
 if __name__ == '__main__':
 

@@ -1,28 +1,47 @@
 
-# WaveformCompare-DATABASE PROCESSING
+# WaveformCompare: DATABASE PROCESSING
 
 ## List of important files and folders:
 
+### RLdatabase/
+#### main folder
+
   - waveformCompare_20170110_master.py (main processing script)
 
-  - OUTPUT (folder containing all processed events)
+  - OUTPUT (folder containing all processed events (with the format 
+    CATALOG_YYYY-MM-DDTHHMMSS_MAGNITUDE_REGION, i.e. GCMT_2007-07-18T180124Z_5.30_SOUTHEAST_OF_HONSHU_JAPAN)) 
 
-  -event_upload_rotjane.py (python script for pushing quakemls to JANE 
-  and posting attachments)
+  - event_upload_rotjane.py (python script for pushing quakemls to JANE database and posting attachments all in one go)
+
+  - crontab_rotjane (cron job template, calls waveformCompare_20170110_master.py and event_upload_rotjane.py on a daily basis)
+
+  - explanations_tex (folder containing explanations of the processing script and the layout of attachments - created for old database so possibly out of date)
 
 
-* populate_database
+### populate_database/ 
+#### for the initialization or complete reset of database
 
   -populate_database.sh (shell script for rerunning the database from scratch,
-  following the composition guide)
+  following the composition guide - will invoke waveformCompare_20170110_master.py starting in 2007 until late-2017, and also include more regional events from the ISC catalog. Subsequently invokes event_upload_rotjane.py to push all events to database, as well as StationXML files from station_files/)
     
   - Catalog_composition_guide.txt (contains info of how to recalculate the whole database)
 
-  - XML-extra_events (contains quakeML-catalogs for ISC-picked events. Most of them are local and low magnitude)
+  - XML-extra_events/ (folder containing individual, regional QuakeML-catalogs for ISC-picked events. Most of them are local/regional and low magnitude)
 
-  - Other files here justify the choices made in composition guide.
+  - extra_events.xml (a collection of all catalogs in XML-extra_events folder)
+
+  - NDK_events_before2014.ndk (a text based catalog of all events prior to 2014, used for faster catalog acquisition as it does not rely on querying a web service)
+
+  - station_files/ (folder containing StationXML files for RLAS and ROMY)
 	
    
+# WORKFLOW: Daily processing
+
+1) Waveform compare script is invoked with no arguments, by default it composes a GCMT catalog of events in the past week. All events are processed individually and uniquely tagged fodlers are filled with a QuakeML file, waveform comparison figures, and a json dictionary containing processed parameters.
+
+2a) Event uploader script is invoked with no arguments, by default it attempts to push all events from the past week to the database. Any events already uploaded are ignored. Uploader first pushes an individual QuakeML file, which creates the core event.
+
+2b) Event uploader script then attaches the images and json file of this event to the QuakeML
 
 ## Troubleshooting/ Preparation:
 
