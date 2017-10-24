@@ -8,12 +8,13 @@
 
   - waveformCompare_20170110_master.py (main processing script)
 
-  - OUTPUT (folder containing all processed events (with the format 
-    CATALOG_YYYY-MM-DDTHHMMSS_MAGNITUDE_REGION, i.e. GCMT_2007-07-18T180124Z_5.30_SOUTHEAST_OF_HONSHU_JAPAN)) 
+  - OUTPUT (folder containing all processed events with the format 
+    CATALOG_YYYY-MM-DDTHHMMSS_MAGNITUDE_REGION, 
+    i.e. GCMT_2007-07-18T180124Z_5.30_SOUTHEAST_OF_HONSHU_JAPAN)) 
 
   - event_upload_rotjane.py (python script for pushing quakemls to JANE database and posting attachments all in one go)
 
-  - crontab_rotjane (cron job template, calls waveformCompare_20170110_master.py and event_upload_rotjane.py on a daily basis)
+  - crontab_rotjane (cron job template; cronjob calls waveformCompare_20170110_master.py and event_upload_rotjane.py on a daily basis)
 
   - explanations_tex (folder containing explanations of the processing script and the layout of attachments - created for old database so possibly out of date)
 
@@ -21,12 +22,15 @@
 ### populate_database/ 
 #### for the initialization or complete reset of database
 
-  -populate_database.sh (shell script for rerunning the database from scratch,
-  following the composition guide - will invoke waveformCompare_20170110_master.py starting in 2007 until late-2017, and also include more regional events from the ISC catalog. Subsequently invokes event_upload_rotjane.py to push all events to database, as well as StationXML files from station_files/)
+  - populate_database.sh (shell script for rerunning the database from scratch,
+  following the composition guide;
+  will invoke waveformCompare_20170110_master.py starting in 2007 until late-2017,
+  also includes more regional events from the ISC catalog. 
+  Subsequently invokes event_upload_rotjane.py to push all events to database, as well as StationXML files from station_files/)
     
-  - Catalog_composition_guide.txt (contains info of how to recalculate the whole database)
+  - Catalog_composition_guide.txt (contains info of how to recalculate the whole database and why certain calls are taken when running the waveformCompare script)
 
-  - XML-extra_events/ (folder containing individual, regional QuakeML-catalogs for ISC-picked events. Most of them are local/regional and low magnitude)
+  - XML-extra_events/ (folder containing individual, regional QuakeML-catalogs for ISC-picked events. Most are local/regional and low magnitude)
 
   - extra_events.xml (a collection of all catalogs in XML-extra_events folder)
 
@@ -35,13 +39,13 @@
   - station_files/ (folder containing StationXML files for RLAS and ROMY)
 	
    
-# WORKFLOW: Daily processing
+## WORKFLOW: Daily processing
 
 1) Waveform compare script is invoked with no arguments, by default it composes a GCMT catalog of events in the past week. All events are processed individually and uniquely tagged fodlers are filled with a QuakeML file, waveform comparison figures, and a json dictionary containing processed parameters.
 
-2a) Event uploader script is invoked with no arguments, by default it attempts to push all events from the past week to the database. Any events already uploaded are ignored. Uploader first pushes an individual QuakeML file, which creates the core event.
+2) Event uploader script is invoked with no arguments, by default it attempts to push all events from the past week to the database. Any events already uploaded are ignored. Uploader first pushes an individual QuakeML file, which creates the core event.
 
-2b) Event uploader script then attaches the images and json file of this event to the QuakeML
+3) Event uploader script then attaches the images and json file of this event to the QuakeML
 
 ## Troubleshooting/ Preparation:
 
@@ -58,11 +62,6 @@
    removes incomplete folders right away. But if the code is interrupted, this might happen.
    SOLUTION: Delete these event-folders and recalculate the events!
 
-
-## Limitations:
-
-
-Only one event per QuakeML file is allowed. This is only to simplify the implementation. During indexing it will warn you if it cannot read a file due to this or other issues.
 
 
 Always remember to set the correct paths!

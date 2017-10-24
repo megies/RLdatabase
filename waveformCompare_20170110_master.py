@@ -147,7 +147,7 @@ def download_data(origin_time, net, sta, loc, chan, source):
     
     # if data path exists, read in data from file
     if dataDir_get:
-        print("Fetching data from file")
+        print("Fetching {} data from file".format(net))
         fileName = ".".join((net, sta, "." + chan + ".D",
                              origin_time.strftime("%Y.%j")))
         filePath = os.path.join(dataDir_get, origin_time.strftime("%Y"),
@@ -192,7 +192,7 @@ def download_data(origin_time, net, sta, loc, chan, source):
     if not st:
         raise RotationalProcessingException('Data not available for this'
                                                                     ' event')
-        
+
     st.trim(starttime=origin_time-180, endtime=origin_time+3*3600)
 
     print('\tDownload of {!s} {!s} data successful'.format(
