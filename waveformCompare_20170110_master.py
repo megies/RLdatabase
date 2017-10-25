@@ -170,6 +170,7 @@ def download_data(origin_time, net, sta, loc, chan, source):
             else:
                 st = read(filePath, starttime = origin_time - 180,
                       endtime = origin_time + 3 * 3600)
+            data_source = 'Archive'
         else:
             print("\tFile not found: \n\t %s \n" % filePath)    
     
@@ -187,17 +188,16 @@ def download_data(origin_time, net, sta, loc, chan, source):
                 except:
                     print('\tFailed')
                     pass
-          
+        data_source = S 
        
     if not st:
         raise RotationalProcessingException('Data not available for this'
                                                                     ' event')
 
     st.trim(starttime=origin_time-180, endtime=origin_time+3*3600)
-
     print('\tDownload of {!s} {!s} data successful'.format(
               st[0].stats.station, st[0].stats.channel))
-    return st
+    return st, data_source
 
 
 def event_info_data(event, station, mode, polarity, instrument):
@@ -246,9 +246,8 @@ def event_info_data(event, station, mode, polarity, instrument):
     depth = origin.depth * 0.001  # Depth in km
 
     if station == 'RLAS':
-        source = ['BGR','LMU']
-        # source = ['http://eida.bgr.de', 
-        #           'http://erde.geophysik.uni-muenchen.de']
+        source = ['http://eida.bgr.de', 
+                  'http://erde.geophysik.uni-muenchen.de']
         net_r = 'BW'
         net_s = 'GR' 
         sta_r = 'RLAS'
@@ -270,14 +269,16 @@ def event_info_data(event, station, mode, polarity, instrument):
             sta_S = 'WETR'
 
         # ringlaser signal, source LMU first
-        rt = download_data(startev, net_r, sta_r, loc_r, chan1, source[::-1])
+        rt,srcRT = download_data(
+                            startev, net_r, sta_r, loc_r, chan1, source[::-1])
         if polarity.lower() == 'reverse':
             rt[0].data *= -1
 
         # broadband station signal
-        acE = download_data(startev, net_s, sta_s, loc_s, chan2, source)
-        acN = download_data(startev,  net_s, sta_s, loc_s, chan3, source)
-        acZ = download_data(startev,  net_s, sta_s, loc_s, chan4, source)
+        # assuming all translation data comes from same source
+        acE,srcTR = download_data(startev, net_s, sta_s, loc_s, chan2, source)
+        acN,srcTR = download_data(startev,  net_s, sta_s, loc_s, chan3, source)
+        acZ,srcTR = download_data(startev,  net_s, sta_s, loc_s, chan4, source)
         ac = Stream(traces=[acE[0], acN[0], acZ[0]])
         for ca in [ac[0], ac[1], ac[2], rt[0]]:
             ca.stats.coordinates = AttribDict()
@@ -318,7 +319,7 @@ def event_info_data(event, station, mode, polarity, instrument):
                                rt[0].stats.coordinates.longitude)
 
     return latter, lonter, depth, startev, rt, ac, baz, gcdist, net_r, net_s,\
-        chan1, chan2, chan3, chan4, sta_r, sta_s, loc_r, loc_s, source
+        chan1, chan2, chan3, chan4, sta_r, sta_s, loc_r, loc_s, srcRT, srcTR
 
 
 def station_components(station):
@@ -1180,7 +1181,7 @@ def sn_ratio(full_signal, p_arrival, sam_rate):
 def store_info_json(rotate, ac, rt, corrcoefs, baz, arriv_p, EBA, folder_name,
                     tag_name, station, phasv_means, phasv_stds, startev, event, 
                     net_r, net_s, chan1, chan2, chan3, chan4, sta_r, sta_s, 
-                    source, loc_r, loc_s, event_source, depth, magnitude, 
+                    srcRT, srcTR, loc_r, loc_s, event_source, depth, magnitude, 
                     distance, max_ebaz_xcoef):
 
     """
@@ -1245,7 +1246,7 @@ def store_info_json(rotate, ac, rt, corrcoefs, baz, arriv_p, EBA, folder_name,
                     ('station', sta_r),
                     ('loc', loc_r),
                     ('channel', chan1),
-                    ('data_source', source)
+                    ('data_source', srcRT)
                     ])
                 ),
                 ('translation_station', 
@@ -1256,7 +1257,7 @@ def store_info_json(rotate, ac, rt, corrcoefs, baz, arriv_p, EBA, folder_name,
                     ('channel_N', chan3),
                     ('channel_E', chan2),
                     ('channel_Z', chan4),
-                    ('data source', source)
+                    ('data_source', srcTR)
                     ])
                 ),
                 ('rotational_parameters',
@@ -1460,7 +1461,7 @@ def plotWaveformComp(event, station, link, mode, event_source, folder_name,
 
     # event information:
     latter, lonter, depth, startev, rt, ac, baz, gcdist, net_r, net_s, chan1,\
-        chan2, chan3, chan4, sta_r, sta_s, loc_r, loc_s, source =\
+        chan2, chan3, chan4, sta_r, sta_s, loc_r, loc_s, srcRT, srcTR =\
         event_info_data(event, station, mode, polarity, instrument)
     try:
         region = event.event_descriptions[0]['text']
@@ -2251,7 +2252,7 @@ def plotWaveformComp(event, station, link, mode, event_source, folder_name,
     store_info_json(rotate, ac, rt, corrcoefs, baz, arriv_p, EBA, folder_name,
                     tag_name, station, phasv_means, phasv_stds, startev, event, 
                     net_r, net_s, chan1, chan2, chan3, chan4, sta_r, sta_s, 
-                    source, loc_r, loc_s, event_source, depth,
+                    srcRT, srcTR, loc_r, loc_s, event_source, depth,
                     event.magnitudes[0]['mag'], 0.001*baz[0], max_ebaz_xcoef)
 
     store_info_xml(folder_name,tag_name,station)
@@ -2260,21 +2261,25 @@ def plotWaveformComp(event, station, link, mode, event_source, folder_name,
 
 if __name__ == '__main__':
 
-    parser = argparse.ArgumentParser(description='Comparison of transversal\
+    parser = argparse.ArgumentParser(description='Comparison of transvere\
         acceleration and vertical rotation rate through direct waveform\
-        comparison in different time windows and cross-correlation analysis.')
-    parser.add_argument('--station', help='Choice of station: RLAS, ROMY, PFO\
+        comparison in different time windows, and cross-correlation analysis.')
+    parser.add_argument('--station', help='Choice of station: RLAS, ROMY\
         (default is RLAS)', type=str, default='RLAS')
-    parser.add_argument('--mode', help='Choice of executive mode for RLAS: \
-        fetch event data from GCMT catalog or get it from a link (for plotting\
-        beachballs)(default: neries, otherwise: link)', type=str,
-                        default='neries')
+    parser.add_argument('--mode', help='Choose catalog to download events: \
+        GCMT catalog for the most up to date catalog. Link for plotting single \
+        event beachballs (requires --link to event). QuakeML file for catalog \
+        of local/regional events. IRIS for most stable solutions, \
+        though recent events might not be present \
+        (default: GCMT, else: link, qmlfile, IRIS)', type=str,default='GCMT')
+    parser.add_argument('--link',help='URL of moment tensor link, related to \
+        link --mode',type=str)
     parser.add_argument('--polarity', help='Flip polarity of rotation data to \
-        fix dat errors, to be used in specific time windows of catalog rerun \
+        fix data errors, to be used in specific time windows of catalog rerun \
         (default: normal, otherwise: reverse)',type=str, default='normal')
     parser.add_argument('--instrument', help='Choose instrument if using RLAS,\
-        GPS went down for a specific time window so WETR can be used in turn,\
-        though data is lower quality than WET\
+        STS2 GPS went down for specific time, so nearby WETR can be used, \
+        though data is lower quality than STS2\
         (default: sts2, otherwise: lennartz)',type=str, default='sts2')
     parser.add_argument('--min_magnitude', help='Minimum magnitude for \
         events (default is 3).', type=float or int, default=4.0)
@@ -2307,10 +2312,11 @@ if __name__ == '__main__':
     mode = args.mode
     polarity = args.polarity
     instrument = args.instrument.upper()
+    link = args.link
 
     # This link leads to the quakeml webpage of a certain event on IRIS.
     # The fetched xml provides a moment tensor data for the beachballs.
-    link = 'http://www.iris.edu/spudservice/momenttensor/736631/quakeml'
+    # i.e. 'http://www.iris.edu/spudservice/momenttensor/736631/quakeml'
 
     if station == 'RLAS' and mode == 'qmlfile':
         print('\nDownloading events from QuakeML')
@@ -2319,7 +2325,7 @@ if __name__ == '__main__':
         event_source = "ISC"
         catalog='ISC'
 
-    elif mode == 'fdsn':
+    elif mode == 'IRIS':
         print('\nDownloading events from IRIS')
         catalog='GCMT'
         event_source = "IRIS"
@@ -2369,7 +2375,7 @@ if __name__ == '__main__':
     print('%i event(s) downloaded, beginning processing...' % len(cat))
     contador1 = contador2 = contador3 = 0
     bars = '='*79
-    error_list,error_type = [],[] 
+    error_list = []
     for event in cat:
         try:
             # print event divider
@@ -2421,6 +2427,7 @@ if __name__ == '__main__':
                             contador3 += 1
                             print(e)
                             print('Removing incomplete folder...\n')
+                            error_list.append(tag_name)
                             shutil.rmtree(folder_name)
 
                         # if keyboard interrupt, remove folder, quit
@@ -2451,6 +2458,7 @@ if __name__ == '__main__':
                     contador3 += 1
                     print(e)
                     print('Removing incomplete folder...\n')
+                    error_list.append(tag_name)
                     shutil.rmtree(folder_name)
                
                 # if keyboard interrupt, remove folder, quit
@@ -2467,6 +2475,20 @@ if __name__ == '__main__':
     print('From a total of %i event(s):\n %i was/were successfully processed'
           '\n %i could not be processed \n %i already processed\n' % (
               len(cat), contador2, contador3, contador1))
+    
+    # write an error log to see what events failed, no reasons just tags
+    # name of errorlog is the time range searched
+    if len(error_list) > 0:
+        if not os.path.exists('./errorlogs'):
+            os.makedirs('./errorlogs')
+
+        errorlog_name = './errorlogs/wavComp_{}_{}.txt'.format(
+                                args.min_datetime[:10],args.max_datetime[:10])
+        print('Writing error log: {}'.format(errorlog_name))
+        with open(errorlog_name,'w') as f:
+            f.write('Error Log Created {}'.format(datetime.datetime.now()))
+            for i in error_list:
+                f.write('{}\n'.format(i))
 
 
 

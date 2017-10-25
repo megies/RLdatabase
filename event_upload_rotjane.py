@@ -174,6 +174,8 @@ for event in cat:
 
 # write error log to txt file to see what failed
 if len(error_list) > 0:
+    if not os.path.exists('../errorlogs'):
+            os.makedirs('../errorlogs')
     os.chdir('../errorlogs')
     timestamp = datetime.datetime.now()
     M = timestamp.month

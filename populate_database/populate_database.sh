@@ -24,7 +24,6 @@ python waveformCompare_20170110_master.py --min_datetime 2016-07-01T00:00 --max_
 python waveformCompare_20170110_master.py --min_datetime 2017-01-01T00:00 --max_datetime 2017-06-30T23:59 --mode fdsn
 python waveformCompare_20170110_master.py --min_datetime 2017-07-01T00:00 --max_datetime 2017-10-15T23:59 --mode fdsn
 
-
 # flipped polarities
 # decided not to flip polarities as it will be interesting to filter by negative correlation, leaving calls to show time periods
 # python waveformCompare_20170110_master.py --min_datetime 2007-09-10T00:00 --max_datetime 2007-09-25T23:59 --mode fdsn --polarity reverse
@@ -40,11 +39,12 @@ python waveformCompare_20170110_master.py --min_datetime 2012-03-15T00:00 --max_
 # extra events from file (ISC catalog tag, not from GCMT catalog)
 python waveformCompare_20170110_master.py --mode qmlfile
 
-# push stationxml files
-python db_request.py --action put --pick stationxml --fileid all
-
 # upload all events from OUTPUT folder
-python OUTPUT/event_upload_rotjane.py --timespan all
+python event_upload_rotjane.py --timespan all
+
+# push stationxml files (can also be done manually)
+cd populate_database
+python db_request.py --action put --pick stationxml --fileid all
 
 
 

@@ -8,8 +8,8 @@
 
   - waveformCompare_20170110_master.py (main processing script)
 
-  - OUTPUT (folder containing all processed events with the format 
-    CATALOG_YYYY-MM-DDTHHMMSS_MAGNITUDE_REGION, 
+  - OUTPUT (folder containing all processed events with the format <br />
+    CATALOG_YYYY-MM-DDTHHMMSS_MAGNITUDE_REGION, <br />
     i.e. GCMT_2007-07-18T180124Z_5.30_SOUTHEAST_OF_HONSHU_JAPAN)) 
 
   - event_upload_rotjane.py (python script for pushing quakemls to JANE database and posting attachments all in one go)
@@ -23,9 +23,9 @@
 #### for the initialization or complete reset of database
 
   - populate_database.sh (shell script for rerunning the database from scratch,
-  following the composition guide;
-  will invoke waveformCompare_20170110_master.py starting in 2007 until late-2017,
-  also includes more regional events from the ISC catalog. 
+  following the composition guide;<br />
+  will invoke waveformCompare_20170110_master.py starting in 2007 until late-2017,<br />
+  also includes more regional events from the ISC catalog. <br />
   Subsequently invokes event_upload_rotjane.py to push all events to database, as well as StationXML files from station_files/)
     
   - Catalog_composition_guide.txt (contains info of how to recalculate the whole database and why certain calls are taken when running the waveformCompare script)
