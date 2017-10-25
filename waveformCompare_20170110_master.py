@@ -176,18 +176,17 @@ def download_data(origin_time, net, sta, loc, chan, source):
     
     # if data/path does not exist, try querying FDSN webservices
     elif (not dataDir_get) or (not st):
-        while not st:
-            for S in source:
-                try:
-                    print("Fetching {} data from FDSN ({})".format(sta,S))
-                    c = fdsnClient(S)
-                    st = c.get_waveforms(network=net, station=sta, location=loc, 
-                                        channel=chan, starttime=origin_time-190,
-                                        endtime=origin_time+3*3600+10)
-                    break
-                except:
-                    print('\tFailed')
-                    pass
+        for S in source:
+            try:
+                print("Fetching {} data from FDSN ({})".format(sta,S))
+                c = fdsnClient(S)
+                st = c.get_waveforms(network=net, station=sta, location=loc, 
+                                    channel=chan, starttime=origin_time-190,
+                                    endtime=origin_time+3*3600+10)
+                break
+            except:
+                print('\tFailed')
+                pass
         data_source = S 
        
     if not st:
@@ -296,11 +295,13 @@ def event_info_data(event, station, mode, polarity, instrument):
         chan2 = 'BHE'
         chan3 = 'BHN'
         chan4 = 'BHZ'
-        source = 'http://erde.geophysik.uni-muenchen.de'
+        source = ['http://eida.bgr.de', 
+                  'http://erde.geophysik.uni-muenchen.de']
         rt,srcRT = download_data(startev, net_r, sta_r, loc_r, chan1, source)
         acE,srcTR = download_data(startev, net_s, sta_s, loc_s, chan2, source)
         acN,srcTR = download_data(startev,  net_s, sta_s, loc_s, chan3, source)
         acZ,srcTR = download_data(startev,  net_s, sta_s, loc_s, chan4, source)
+        
         ac = Stream(traces=[acE[0], acN[0], acZ[0]])
         for ca in [ac[0], ac[1], ac[2], rt[0]]:
             ca.stats.coordinates = AttribDict()
