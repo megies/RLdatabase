@@ -297,10 +297,10 @@ def event_info_data(event, station, mode, polarity, instrument):
         chan3 = 'BHN'
         chan4 = 'BHZ'
         source = 'http://erde.geophysik.uni-muenchen.de'
-        rt = download_data(startev, net_r, sta_r, loc_r, chan1, source)
-        acE = download_data(startev, net_s, sta_s, loc_s, chan2, source)
-        acN = download_data(startev,  net_s, sta_s, loc_s, chan3, source)
-        acZ = download_data(startev,  net_s, sta_s, loc_s, chan4, source)
+        rt,srcRT = download_data(startev, net_r, sta_r, loc_r, chan1, source)
+        acE,srcTR = download_data(startev, net_s, sta_s, loc_s, chan2, source)
+        acN,srcTR = download_data(startev,  net_s, sta_s, loc_s, chan3, source)
+        acZ,srcTR = download_data(startev,  net_s, sta_s, loc_s, chan4, source)
         ac = Stream(traces=[acE[0], acN[0], acZ[0]])
         for ca in [ac[0], ac[1], ac[2], rt[0]]:
             ca.stats.coordinates = AttribDict()
@@ -1469,7 +1469,8 @@ def plotWaveformComp(event, station, link, mode, event_source, folder_name,
     except:
         reg=False
     
-    MomentTensor, Magnitude, Region = Get_MomentTensor_Magnitude(link)
+    if link != 'blank':
+        MomentTensor, Magnitude, Region = Get_MomentTensor_Magnitude(link)
 
     # first image page: map with event location & information
     print('\nPage 1, map with station, event and great circle')
@@ -2273,7 +2274,7 @@ if __name__ == '__main__':
         though recent events might not be present \
         (default: GCMT, else: link, qmlfile, IRIS)', type=str,default='GCMT')
     parser.add_argument('--link',help='URL of moment tensor link, related to \
-        link --mode',type=str)
+        link --mode',type=str,default='blank')
     parser.add_argument('--polarity', help='Flip polarity of rotation data to \
         fix data errors, to be used in specific time windows of catalog rerun \
         (default: normal, otherwise: reverse)',type=str, default='normal')
@@ -2438,6 +2439,7 @@ if __name__ == '__main__':
 
                 # if json not found, folder is incomplete, continue
                 except FileNotFoundError:
+                    error_list.append(tag_name)
                     print('Incomplete folder found\n')
                     contador1 += 1 
     
@@ -2486,7 +2488,7 @@ if __name__ == '__main__':
                                 args.min_datetime[:10],args.max_datetime[:10])
         print('Writing error log: {}'.format(errorlog_name))
         with open(errorlog_name,'w') as f:
-            f.write('Error Log Created {}'.format(datetime.datetime.now()))
+            f.write('Error Log Created {}\n'.format(datetime.datetime.now()))
             for i in error_list:
                 f.write('{}\n'.format(i))
 

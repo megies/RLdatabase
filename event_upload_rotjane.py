@@ -181,7 +181,7 @@ if len(error_list) > 0:
     M = timestamp.month
     Y = timestamp.year
     mode = 'w'
-    log_name = 'upload_errorlog_{}_{}.txt'.format(M,Y)
+    log_name = 'upload_{}_{}.txt'.format(M,Y)
 
     # check if file exists
     if os.path.exists(log_name):
