@@ -178,7 +178,7 @@ def download_data(origin_time, net, sta, loc, chan, source):
     elif (not dataDir_get) or (not st):
         for S in source:
             try:
-                print("Fetching {} data from FDSN ({})".format(sta,S))
+                print("Fetching {} data from FDSN ({})".format(net,S))
                 c = fdsnClient(S)
                 st = c.get_waveforms(network=net, station=sta, location=loc, 
                                     channel=chan, starttime=origin_time-190,
@@ -1182,8 +1182,8 @@ def sn_ratio(full_signal, p_arrival, sam_rate):
 def store_info_json(rotate, ac, rt, corrcoefs, baz, arriv_p, EBA, folder_name,
                     tag_name, station, phasv_means, phasv_stds, startev, event, 
                     net_r, net_s, chan1, chan2, chan3, chan4, sta_r, sta_s, 
-                    srcRT, srcTR, loc_r, loc_s, event_source, depth, magnitude, 
-                    distance, max_ebaz_xcoef):
+                    srcRT, srcTR, loc_r, loc_s, event_source, depth, 
+                    gcdist, max_ebaz_xcoef):
 
     """
     Generates a human readable .json file that stores data for each event,
@@ -1210,14 +1210,23 @@ def store_info_json(rotate, ac, rt, corrcoefs, baz, arriv_p, EBA, folder_name,
     :param folder_name: Name of the folder containing the event.
     :type tag_name: string
     :param tag_name: Handle of the event.
+    :phasv_means
     :type station: str
     :param station: Station from which data are fetched (i.e. 'RLAS').
+    :type srcRT: str
+    :param station: Data source for RoTations
+    :type srcTR: str
+    :param srcTR: Data source for TRanslations
     """
     compE, compN = station_components(station)
-   
+    orig = event.preferred_origin() or event.origins[0] # Event origin
+    magnitude = event.preferred_magnitude() or event.magnitudes[0] # Mag info.
+    distance = 0.001*baz[0] # Distance in km
+
     PAT = max(rotate[1])  # Peak transverse acceleration [nm/s]
     PRZ = max(rt[0].data)  # Peak vertical rotation rate [nrad/s]
     PCC = max(corrcoefs)  # Peak correlation coefficient
+    MCC = min(corrcoefs) # Minimum correlation coefficient
     TBA = baz[2]  # Theoretical backazimuth [°]
     SNT = sn_ratio(rotate[1], arriv_p, ac.select(component=compN)[0].
                                         stats.sampling_rate)  # Transv. Acc SNR
@@ -1227,10 +1236,13 @@ def store_info_json(rotate, ac, rt, corrcoefs, baz, arriv_p, EBA, folder_name,
     dic_event = OrderedDict([
                 ('event_id',event.resource_id.id),
                 ('event_source',event_source),
+                ('event_latitude',orig.latitude),
+                ('event_longitude',orig.longitude),
                 ('origin_time',str(startev)),
                 ('trace_start',str(startev-180)),
                 ('trace_end',str(startev+3*3600)),
-                ('magnitude',magnitude),
+                ('magnitude',magnitude.mag),
+                ('magnitude_type',magnitude.magnitude_type),
                 ('depth',depth),
                 ('depth_unit','km')
                 ])
@@ -1239,8 +1251,8 @@ def store_info_json(rotate, ac, rt, corrcoefs, baz, arriv_p, EBA, folder_name,
     dic_station = OrderedDict([
             ('station_information_{}'.format(station), 
                 OrderedDict([
-                ('station_latitude',str(rt[0].stats.coordinates['latitude'])),
-                ('station_longitude',str(rt[0].stats.coordinates['longitude'])),
+                ('station_latitude',rt[0].stats.coordinates['latitude']),
+                ('station_longitude',rt[0].stats.coordinates['longitude']),
                 ('rotation_station', 
                     OrderedDict([
                     ('network', net_r),
@@ -1265,6 +1277,7 @@ def store_info_json(rotate, ac, rt, corrcoefs, baz, arriv_p, EBA, folder_name,
                     OrderedDict([
                     ('epicentral_distance', distance),
                     ('epicentral_distance_unit', 'km'),
+                    ('epicentral_distance_in_deg', gcdist),
                     ('theoretical_backazimuth', TBA),
                     ('estimated_backazimuth', EBA),
                     ('backazimuth_unit', 'degrees'),
@@ -1274,6 +1287,7 @@ def store_info_json(rotate, ac, rt, corrcoefs, baz, arriv_p, EBA, folder_name,
                     ('peak_transverse_acceleration', PAT),
                     ('peak_transverse_acceleration_unit', 'nm/s^2'),
                     ('peak_correlation_coefficient', PCC),
+                    ('minimum_correlation_coefficient', MCC),
                     ('vertical_rotation_rate_SNR', SNR),
                     ('transverse_acceleration_SNR', SNT),
                     ])
@@ -2254,8 +2268,8 @@ def plotWaveformComp(event, station, link, mode, event_source, folder_name,
     store_info_json(rotate, ac, rt, corrcoefs, baz, arriv_p, EBA, folder_name,
                     tag_name, station, phasv_means, phasv_stds, startev, event, 
                     net_r, net_s, chan1, chan2, chan3, chan4, sta_r, sta_s, 
-                    srcRT, srcTR, loc_r, loc_s, event_source, depth,
-                    event.magnitudes[0]['mag'], 0.001*baz[0], max_ebaz_xcoef)
+                    srcRT, srcTR, loc_r, loc_s, event_source, depth, 
+                    gcdist, max_ebaz_xcoef)
 
     store_info_xml(folder_name,tag_name,station)
 
@@ -2405,12 +2419,14 @@ if __name__ == '__main__':
 
             # i.e. 'GCMT_2017-09-23T125302_6.05_OAXACA_MEXICO'
             tag_name = '_'.join((catalog,time_tag,mag_tag,flinn_engdahl))
+            tag_name_short = '_'.join((catalog,time_tag))
 
             # i.e. './OUTPUT/GCMT_2017-09-23T125302_6.05_OAXACA_MEXICO/
-            folder_name = os.path.join(output_path,tag_name) + '/'
+            folder_name = os.path.join(output_path,tag_name) + '/' 
 
             # check if event already processed by checking json file,
             # if new station, run waveform compare
+
             if os.path.exists(str(folder_name)):
                 try:
                     filename_json = folder_name + tag_name + '.json'
@@ -2443,7 +2459,7 @@ if __name__ == '__main__':
                     error_list.append(tag_name)
                     print('Incomplete folder found\n')
                     contador1 += 1 
-    
+
             
             # event encountered for the first time, create folder, xml, process
             elif not os.path.exists(str(folder_name)):  
