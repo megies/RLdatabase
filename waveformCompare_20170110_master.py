@@ -3,44 +3,39 @@
 
 """
 ROTATIONAL SEISMOLOGY ROUTINES. Following the theory and assuming a
-transversely polarized plane wave, it compares the transversal acceleration
-and the vertical rotation rate of an event through:
+transversely polarized plane wave, this script compares the transverse 
+acceleration and vertical rotation rate of an event through:
 
 1) direct waveform comparison in different time windows (P-coda, S-waves and
-surface waves) using broadband data from WET (Wettzell) station for the
+surface waves) using broadband data from WET (Wettzell) station for 
 acceleration and from Wettzell ringlaser (RLAS station) for the vertical
 rotation rate.
 
 2) zero-lag cross-correlation analysis of the waveforms using the theoretical
 backazimuth of the event. Aside from the correlation-coefficients, it returns
 the local horizontal phase velocity for the time windows with a correlation
-factor larger than 0.75. It also does the correlation analysis for different
-azimuths and estimates the backazimuth as the one that has the highest
+factor larger than 0.75. It also preforms correlation analysis for different
+azimuths and estimates the backazimuth from the one that has the highest
 correlation coefficients.
 
-Additionally, the routine generates a .xml file that stores data for each
-event, like peak values (acceleration, rotation rate, zero-lag correlation
-coefficient), signal-to-noise ratio, backazimuths.
+Additionally, the routine generates:
+
++ a QuakeML (.xml) file that stores data for each event, and contains an extra 
+tag with rotational parameters, to be used in the JANE format database
+
++ a human readable (.json) ordered dictionary text file that contains both
+event and station information, as well as output data results from processing
 
 
-INFORMATION: This script can be used to generate the figures for the website.
-Concerning dispersion curves there are different updated versions, that include
-more frequency bands and improved filtering. The problem is that automated 
-velocity picking does not work very well. Therefore:
+INFORMATION: This script can be used to generate figures for the database.
 
-+ Choose the built in velocity picker to pick phase velocities for single events 
-by hand. Set: --mode velocity_picker
++ QuakeML files can be read in directly, for example to pull events from other 
+catalogs (ISC, ...) by setting: --mode qmlfile
 
-+ It allows to filter the to be processed events by different parameters,
-including a distance-to-magnitude ratio. --> set: --filter True
-
-+ YOU CAN ALSO READ IN QUAKEML FILES DIRECTLY, E.G. TO GET EVENTS FROM OTHER 
-CATALOGES (ISC, ...) by setting: --mode qmlfile
-
-+ YOU CAN CHOOSE EVENTS FROM THE IRIS FDSN CATALOG, which is usually faster
++ Events can be chosen from the IRIS FDSN catalog, which is usually faster
 and more abundant especially for older events. Set: --mode fdsn
 
-+ The events are bandstoppped for the secondary microseism (5-12s) if they are 
++ Events are bandstoppped for the secondary microseism (5-12s) if they are 
 non-local.
 
 + maximum correlation coefficients for the estimated BAz are added 
@@ -49,8 +44,6 @@ in the subplot 3 on page 3.
 + only 0.5 hour recordings shown for local and close events!
 
 + P-coda windows (sec_p) now shorter for local and close events (2s).
-
-+ creates a new xml file containing most of the parameters of the json-file
 
 + 28.09.17 - To-change log: 
     -Get_corrcoeffs: clean up the cross correlation for loops
@@ -67,6 +60,7 @@ in the subplot 3 on page 3.
 import os
 import sys
 import json
+import glob
 import obspy
 import shutil
 import argparse
@@ -128,8 +122,11 @@ def download_data(origin_time, net, sta, loc, chan, source):
     :type chan: str
     :param chan: Channel code, e.g. ``'EHE'``. Channel code may
         contain wild cards.
-    :return: Stream object :class: `~obspy.core.stream.Stream`
+
+    :type st: Stream object :class: `~obspy.core.stream.Stream`
+    :return st: fetched data stream
     """
+    # arclink is deprecated, but call is kept for posterity? rip
     # try:
     #     c = arclinkClient(user='test@obspy.org')
     #     st = c.get_waveforms(network=net, station=sta, location='', 
@@ -137,7 +134,7 @@ def download_data(origin_time, net, sta, loc, chan, source):
     #                          starttime=origin_time-190,
     #                          endtime=origin_time+3*3600+10)
     
-    # check to see if running on FFB, LMU or neither
+    # check paths to see if running on FFB, LMU or neither
     st = None
     dataDir_get = '/bay200/mseed_online/archive/' #FFB
     if not os.path.exists(dataDir_get):
@@ -148,14 +145,14 @@ def download_data(origin_time, net, sta, loc, chan, source):
     # if data path exists, read in data from file
     if dataDir_get:
         print("Fetching {} data from file".format(net))
-        fileName = ".".join((net, sta, "." + chan + ".D",
-                             origin_time.strftime("%Y.%j")))
-        filePath = os.path.join(dataDir_get, origin_time.strftime("%Y"),
+        fileName = '.'.join((net, sta, '.' + chan + '.D',
+                             origin_time.strftime('%Y.%j')))
+        filePath = os.path.join(dataDir_get, origin_time.strftime('%Y'),
                                 net, sta, chan + '.D', fileName)
         o_time2 = origin_time + 86400
-        fileName2 = ".".join((net, sta, "." + chan + ".D",
-                             o_time2.strftime("%Y.%j")))
-        filePath2 = os.path.join(dataDir_get, o_time2.strftime("%Y"),
+        fileName2 = '.'.join((net, sta, '.' + chan + '.D',
+                             o_time2.strftime('%Y.%j')))
+        filePath2 = os.path.join(dataDir_get, o_time2.strftime('%Y'),
                                 net, sta, chan + '.D', fileName2)
         if os.path.isfile(filePath):
             if origin_time.hour > 21:
@@ -185,17 +182,18 @@ def download_data(origin_time, net, sta, loc, chan, source):
                                     endtime=origin_time+3*3600+10)
                 break
             except:
-                print('\tFailed')
+                print("\tFailed")
                 pass
         data_source = S 
-       
+    
     if not st:
-        raise RotationalProcessingException('Data not available for this'
-                                                                    ' event')
+        raise RotationalProcessingException("Data not available for this"
+                                                                    " event")
 
     st.trim(starttime=origin_time-180, endtime=origin_time+3*3600)
-    print('\tDownload of {!s} {!s} data successful'.format(
+    print("\tDownload of {!s} {!s} data successful".format(
               st[0].stats.station, st[0].stats.channel))
+    
     return st, data_source
 
 
@@ -214,8 +212,7 @@ def event_info_data(event, station, mode, polarity, instrument):
     :type station: str
     :param station: Station from which data are fetched (i.e. 'RLAS').
     :type mode: str
-    :param mode: Defines if WET data are fetched from Neries ('neries')
-        or an IRIS link ('link').
+    :param mode: Defines where data fetched from
     :type polarity: str
     :param polarity: 'normal' or 'reverse' choice for rotation polarity
     :type instrument: str
@@ -233,10 +230,9 @@ def event_info_data(event, station, mode, polarity, instrument):
     :rtype ac: :class: `~obspy.core.stream.Stream`
     :return ac: Three component broadband station signal.
     :rtype baz: tuple
-    :return baz: [0] great circle distance in m, [1] theoretical azimuth,
-        [2] theoretical backazimuth.
-    :rtype gcdist: float
-    :return gcdist: Great circle distance in degrees.
+    :return baz: [0] great circle distance in m, 
+                 [1] theoretical azimuth,
+                 [2] theoretical backazimuth.
     """
     origin = event.preferred_origin() or event.origins[0]
     latter = origin.latitude
@@ -314,12 +310,7 @@ def event_info_data(event, station, mode, polarity, instrument):
     baz = gps2dist_azimuth(latter, lonter, rt[0].stats.coordinates.latitude,
                           rt[0].stats.coordinates.longitude)
     
-    # Great circle distance
-    gcdist = locations2degrees(latter, lonter,
-                               rt[0].stats.coordinates.latitude,
-                               rt[0].stats.coordinates.longitude)
-
-    return latter, lonter, depth, startev, rt, ac, baz, gcdist, net_r, net_s,\
+    return latter, lonter, depth, startev, rt, ac, baz, net_r, net_s,\
         chan1, chan2, chan3, chan4, sta_r, sta_s, loc_r, loc_s, srcRT, srcTR
 
 
@@ -566,11 +557,13 @@ def remove_instr_resp(rt, ac, rt_pcoda, ac_pcoda, station, startev):
         for traza in (ac + ac_pcoda):
             traza.data = 1e9 * traza.data
 
+    else:
+        sys.exit('Invalid station')
 
-    # make sure start and endtimes match for both instruments
+
+    # make sure start and endtimes match for both instruments, if not, trim
     startaim = max([tr.stats.starttime for tr in (ac + rt)])
     endtaim = min([tr.stats.endtime for tr in (ac + rt)])
-
     ac.trim(startaim, endtaim, nearest_sample=True)
     rt.trim(startaim, endtaim, nearest_sample=True)
     ac_pcoda.trim(startaim, endtaim, nearest_sample=True)
@@ -579,15 +572,26 @@ def remove_instr_resp(rt, ac, rt_pcoda, ac_pcoda, station, startev):
     return rt, ac, rt_pcoda, ac_pcoda
 
 def gaussianfilter(sigarray, delta, bandwidth, freq0):
+    
     """
-    sigarray = signal array (much faster if the length of this is a power of 2)
-    delta    = time sampling interval (seconds)
-    bandwidth    = filter df (>0.)
-    freq0    = center frequency (Hz)
+    Gaussian filter function. Not used in script, left incase necessary later
+    
+    :type sigarray: np array
+    :param sigarray: signal array (much faster if the length is a power of 2)
+    :type delta: float
+    :param delta: time sampling interval (seconds)
+    :type bandwidth: float    
+    :param bandwith: filter df (must be > 0)
+    :type freq0: float
+    :param freq0: center frequency (Hz)
+    :rtype sigarray_filtered: np array
+    :return sigarray_filtered: the guassian filtered array
+
     """
-    #1 : prepare the frequency domain filter
-    n = len(sigarray)  #number of samples
-    freq = fftfreq(n, delta) #exact (!) frequency array
+    # prepare the frequency domain filter
+    n = len(sigarray)  # N
+    freq = fftfreq(n, delta) # exact (!) frequency array
+    
     # construct our gaussian according the constQ criterion of Archambeau et al.
     # do not forget negative frequencies
     beta = np.log(2.)/2.
@@ -595,11 +599,11 @@ def gaussianfilter(sigarray, delta, bandwidth, freq0):
                                     (np.abs(freq - freq0) / bandwidth) ** 2.) 
 
 
-    #2 : convolve your signal by the filter in frequency domain 
+    # convolve your signal by the filter in frequency domain 
     sigarray_fourier = fft(sigarray) 
     sigarray_fourier_filtered = sigarray_fourier * g
 
-    #3 : back to time domain
+    # back to time domain
     sigarray_filtered = np.real(ifft(sigarray_fourier_filtered))
     sigarray_filtered = highpass(sigarray_filtered, freq=0.0033, 
                                                 df=5, corners=3, zerophase=True)
@@ -844,7 +848,6 @@ def time_windows(baz, arriv_p, arriv_s, init_sec, is_local):
     :return min_lwf: Starttime for latter surface-waves window.
     :rtype max_lwf: Endtime for latter surface-waves window.
     """
-
     # TIME WINDOWS (for arrivals and subplots)
     # Window lengths dependent on event distance
     if is_local == 'non-local':
@@ -878,7 +881,6 @@ def time_windows(baz, arriv_p, arriv_s, init_sec, is_local):
         max_lwi = min_lwi + 12
         min_lwf = max_lwi
         max_lwf = min_lwf + 80
-
 
     return min_pw, max_pw, min_sw, max_sw, min_lwi, max_lwi, min_lwf, max_lwf
 
@@ -1179,11 +1181,10 @@ def sn_ratio(full_signal, p_arrival, sam_rate):
     return SNR
 
 
-def store_info_json(rotate, ac, rt, corrcoefs, baz, arriv_p, EBA, folder_name,
-                    tag_name, station, phasv_means, phasv_stds, startev, event, 
+def store_info_json(rotate, ac, rt, corrcoefs, baz, arriv_p, EBA, station, phasv_means, phasv_stds, startev, event, 
                     net_r, net_s, chan1, chan2, chan3, chan4, sta_r, sta_s, 
-                    srcRT, srcTR, loc_r, loc_s, event_source, depth, 
-                    gcdist, max_ebaz_xcoef):
+                    srcRT, srcTR, loc_r, loc_s, depth, max_ebaz_xcoef, 
+                    folder_name, tag_name):
 
     """
     Generates a human readable .json file that stores data for each event,
@@ -1206,10 +1207,6 @@ def store_info_json(rotate, ac, rt, corrcoefs, baz, arriv_p, EBA, folder_name,
     :param arriv_p: Arrival time of the first P-wave.
     :type EBA: float
     :param EBA: Estimated backazimuth.
-    :type folder_name: string
-    :param folder_name: Name of the folder containing the event.
-    :type tag_name: string
-    :param tag_name: Handle of the event.
     :phasv_means
     :type station: str
     :param station: Station from which data are fetched (i.e. 'RLAS').
@@ -1217,17 +1214,23 @@ def store_info_json(rotate, ac, rt, corrcoefs, baz, arriv_p, EBA, folder_name,
     :param station: Data source for RoTations
     :type srcTR: str
     :param srcTR: Data source for TRanslations
+    :type folder_name: string
+    :param folder_name: Name of the folder containing the event.
+    :type tag_name: string
+    :param tag_name: Handle of the event.
     """
     compE, compN = station_components(station)
     orig = event.preferred_origin() or event.origins[0] # Event origin
+    catalog = orig.creation_info.author or orig.creation_info.agency_id
     magnitude = event.preferred_magnitude() or event.magnitudes[0] # Mag info.
-    distance = 0.001*baz[0] # Distance in km
 
     PAT = max(rotate[1])  # Peak transverse acceleration [nm/s]
     PRZ = max(rt[0].data)  # Peak vertical rotation rate [nrad/s]
     PCC = max(corrcoefs)  # Peak correlation coefficient
     MCC = min(corrcoefs) # Minimum correlation coefficient
     TBA = baz[2]  # Theoretical backazimuth [°]
+    DS_KM = 0.001 * baz[0] # Epicentral Distance [km]
+    DS_DEG =  DS_KM / 111.11 # Epicentral Distance [°]
     SNT = sn_ratio(rotate[1], arriv_p, ac.select(component=compN)[0].
                                         stats.sampling_rate)  # Transv. Acc SNR
     SNR = sn_ratio(rt[0].data, arriv_p, rt[0].stats.sampling_rate) # SNR for RR
@@ -1235,7 +1238,7 @@ def store_info_json(rotate, ac, rt, corrcoefs, baz, arriv_p, EBA, folder_name,
     # common event dictionary
     dic_event = OrderedDict([
                 ('event_id',event.resource_id.id),
-                ('event_source',event_source),
+                ('event_source',catalog),
                 ('event_latitude',orig.latitude),
                 ('event_longitude',orig.longitude),
                 ('origin_time',str(startev)),
@@ -1275,9 +1278,9 @@ def store_info_json(rotate, ac, rt, corrcoefs, baz, arriv_p, EBA, folder_name,
                 ),
                 ('rotational_parameters',
                     OrderedDict([
-                    ('epicentral_distance', distance),
+                    ('epicentral_distance', DS_KM),
                     ('epicentral_distance_unit', 'km'),
-                    ('epicentral_distance_in_deg', gcdist),
+                    ('epicentral_distance_in_deg', DS_DEG),
                     ('theoretical_backazimuth', TBA),
                     ('estimated_backazimuth', EBA),
                     ('backazimuth_unit', 'degrees'),
@@ -1399,8 +1402,9 @@ def store_info_xml(folder_name,tag_name,station):
 
     """
     Store extra parameters in the xml file under the namespace rotational
-    seismology. Parameters used for filtering events on the JANE database
-    framework. Takes parameters from the .json file 
+    seismology. Stations are taken care of in nested tags in the extra tag
+    of the xml file. Parameters used for filtering events on the JANE database
+    framework, taken from .json file 
 
     :type folder_name: string
     :param folder_name: Name of the folder containing the event.
@@ -1448,8 +1452,7 @@ def store_info_xml(folder_name,tag_name,station):
 
 
 
-def plotWaveformComp(event, station, link, mode, event_source, folder_name, 
-                                                                    tag_name):
+def plotWaveformComp(event, station, link, mode, folder_name, tag_name):
 
     """
     Compares vertical rotation rate and transversal acceleration through
@@ -1466,8 +1469,7 @@ def plotWaveformComp(event, station, link, mode, event_source, folder_name,
     :param link: Link to the Iris-xml, where event and moment tensor data are
         fetched.
     :type mode: str
-    :param mode: Defines if WET data are fetched from Neries ('neries')
-        or an IRIS link ('link').
+    :param mode: Defines where data fetched from
     :type folder_name: string
     :param folder_name: Name of the folder containing the event.
     :type tag_name: string
@@ -1475,7 +1477,7 @@ def plotWaveformComp(event, station, link, mode, event_source, folder_name,
     """
 
     # event information:
-    latter, lonter, depth, startev, rt, ac, baz, gcdist, net_r, net_s, chan1,\
+    latter, lonter, depth, startev, rt, ac, baz, net_r, net_s, chan1,\
         chan2, chan3, chan4, sta_r, sta_s, loc_r, loc_s, srcRT, srcTR =\
         event_info_data(event, station, mode, polarity, instrument)
     try:
@@ -1488,7 +1490,7 @@ def plotWaveformComp(event, station, link, mode, event_source, folder_name,
         MomentTensor, Magnitude, Region = Get_MomentTensor_Magnitude(link)
 
     # first image page: map with event location & information
-    print('\nPage 1, map with station, event and great circle')
+    print("\nPage 1, map with station, event and great circle")
     if is_local(baz) == 'local':
         plt.figure(figsize=(18, 9))
         plt.subplot2grid((4, 9), (0, 4), colspan=5, rowspan=4)
@@ -1761,7 +1763,7 @@ def plotWaveformComp(event, station, link, mode, event_source, folder_name,
 
     plt.savefig(folder_name + tag_name + '_{}_page_1.png'.format(station))
     plt.close()
-    print('Completed and Saved')
+    print("Completed and Saved")
 
 
     # Preprocesing of rotational and translational signal
@@ -1773,11 +1775,11 @@ def plotWaveformComp(event, station, link, mode, event_source, folder_name,
     rt, ac, rt_pcoda, ac_pcoda, sec, cutoff, cutoff_pc = resample(
                                                     is_local(baz), baz, rt, ac)
 
-    print('Removing instrument response')
+    print("Removing instrument response")
     rt, ac, rt_pcoda, ac_pcoda = remove_instr_resp(
                                     rt, ac, rt_pcoda, ac_pcoda,station, startev)
 
-    print('Filtering and rotating')
+    print("Filtering and rotating")
     rotate, pcod_rotate, pcoda_rotate, frtp, facp, frotate, cop_rt, rt_band1,\
         rt_band2, rt_band3, rt_band4, rt_band5, rt_band6, rt_band7, rt_band8,\
         rotate_band1, rotate_band2, rotate_band3, rotate_band4, rotate_band5,\
@@ -1785,7 +1787,7 @@ def plotWaveformComp(event, station, link, mode, event_source, folder_name,
         filter_and_rotate(ac, rt, baz, rt_pcoda, ac_pcoda, cutoff, cutoff_pc,
                           station, is_local(baz))
 
-    print('Getting arrival times')
+    print("Getting arrival times")
     # When the event starts in the fetched data
     init_sec = startev - ac[0].stats.starttime
 
@@ -1808,7 +1810,7 @@ def plotWaveformComp(event, station, link, mode, event_source, folder_name,
     #    rt[0].data = rt[0].data*(-1)  # if flipped, re-flip it!
 
     # Waveform comparison plot
-    print('\nPage 2, waveform comparison plot')
+    print("\nPage 2, waveform comparison plot")
     time = rt[0].stats.delta * np.arange(0, len(rt[0].data))  # Time in seconds
 
     rt.taper(max_percentage=0.05)
@@ -1973,10 +1975,10 @@ def plotWaveformComp(event, station, link, mode, event_source, folder_name,
 
     plt.savefig(folder_name + tag_name + '_{}_page_2.png'.format(station))
     plt.close()
-    print('Completed and Saved')
+    print("Completed and Saved")
 
     # cross-correlation analysis
-    print('Zero-lag correlation coefficients')
+    print("Zero-lag correlation coefficients")
     corrcoefs, thres = Get_corrcoefs(rt[0], rt[0].data, ac, rotate[1], sec,
                                      station)
     # calculate coefs for different frequency bands
@@ -1998,19 +2000,19 @@ def plotWaveformComp(event, station, link, mode, event_source, folder_name,
                                             rotate_band8[1], 6, station)
 
     # zero-lag correlation coefficients for range of backazimuths
-    print('Backazimuth analysis')
+    print("Backazimuth analysis")
     corrbaz, maxcorr, backas, max_coefs_10deg = \
         backas_analysis(rt[0], rt[0].data, ac, sec, corrcoefs, None, station)
 
     X, Y = np.meshgrid(np.arange(0, sec * len(corrcoefs), sec), backas)
 
     # Estimating backazimuth
-    print('Estimating backazimuth')
+    print("Estimating backazimuth")
     corrsum, backas2, max_ebaz_xcoef, best_ebaz = backas_est(
                                             rt, ac, min_sw, max_lwf, station)
 
     # calculate phase veloc. for windows where corrcoef is good enough (.75)
-    print('Calculating phase velocities')
+    print("Calculating phase velocities")
 
     # calculate startindex for phase velocity calculation in frequency bands:
     # starts at the beginning of surface wave arrivals as body waves are
@@ -2067,7 +2069,7 @@ def plotWaveformComp(event, station, link, mode, event_source, folder_name,
             phasv_stds.append(np.NaN)
 
 
-    print('\nPage 3, cross-correlation and phase velocity figures')
+    print("\nPage 3, cross-correlation and phase velocity figures")
 
     plt.figure(figsize=(18, 9))
     plt.subplot2grid((4, 26), (0, 0), colspan=25)
@@ -2147,13 +2149,13 @@ def plotWaveformComp(event, station, link, mode, event_source, folder_name,
     
     plt.savefig(folder_name + tag_name + '_{}_page_3.png'.format(station))
     plt.close()
-    print('Completed and Saved')
+    print("Completed and Saved")
 
 
-    print('Analyzing rotations in the P-coda')
-    print('Zero-lag correlation coefficients')
+    print("Analyzing rotations in the P-coda")
+    print("Zero-lag correlation coefficients")
 
-    if is_local(baz)=="non-local":
+    if is_local(baz)=='non-local':
         sec_p = 5
     else:
         sec_p = 2
@@ -2168,7 +2170,7 @@ def plotWaveformComp(event, station, link, mode, event_source, folder_name,
     corrcoefs_p, thres_p = Get_corrcoefs(rt_pcoda[0], rt_pcodaxc, facp,
                                             pcoda_rotatexc, sec_p, station)
 
-    print('Backazimuth analysis')
+    print("Backazimuth analysis")
 
     # integers for indexing
     ac_pc_SR = int(ac_pcoda[0].stats.sampling_rate)
@@ -2194,7 +2196,7 @@ def plotWaveformComp(event, station, link, mode, event_source, folder_name,
         else:
             maxcorrp_over50.append(0)
 
-    print('\nPage 4, cross-correlation for P-coda')
+    print("\nPage 4, cross-correlation for P-coda")
     plt.figure(figsize=(18, 9))
     plt.subplot2grid((5, 26), (0, 0), colspan=25)
     plt.plot(time_p, ac_pcoda.select(component='Z')[0].data, color='g')
@@ -2261,19 +2263,18 @@ def plotWaveformComp(event, station, link, mode, event_source, folder_name,
    
     plt.savefig(folder_name + tag_name + '_{}_page_4.png'.format(station))
     plt.close()
-    print('Completed and Saved')
+    print("Completed and Saved")
 
 
-    print('Storing event information in JSON and XML')
-    store_info_json(rotate, ac, rt, corrcoefs, baz, arriv_p, EBA, folder_name,
-                    tag_name, station, phasv_means, phasv_stds, startev, event, 
-                    net_r, net_s, chan1, chan2, chan3, chan4, sta_r, sta_s, 
-                    srcRT, srcTR, loc_r, loc_s, event_source, depth, 
-                    gcdist, max_ebaz_xcoef)
+    print("Storing event information in JSON and XML")
+    store_info_json(rotate, ac, rt, corrcoefs, baz, arriv_p, EBA, station, 
+                    phasv_means, phasv_stds, startev, event, net_r, net_s, 
+                    chan1, chan2, chan3, chan4, sta_r, sta_s, srcRT, srcTR, 
+                    loc_r, loc_s, depth, max_ebaz_xcoef, folder_name, tag_name)
 
     store_info_xml(folder_name,tag_name,station)
 
-    print('Completed and Saved\n')
+    print("Done\n")
 
 if __name__ == '__main__':
 
@@ -2284,12 +2285,12 @@ if __name__ == '__main__':
         (default is RLAS)', type=str, default='RLAS')
     parser.add_argument('--mode', help='Choose catalog to download events: \
         GCMT catalog for the most up to date catalog. Link for plotting single \
-        event beachballs (requires --link to event). QuakeML file for catalog \
-        of local/regional events. IRIS for most stable solutions, \
+        event beachballs (requires --link to event). ISC QuakeML file for \
+        catalog of local/regional events. IRIS for most stable solutions, \
         though recent events might not be present \
-        (default: GCMT, else: link, qmlfile, IRIS)', type=str,default='GCMT')
-    parser.add_argument('--link',help='URL of moment tensor link, related to \
-        link --mode',type=str,default='blank')
+        (default: gcmt, else: iscquakeml, iris, link)', type=str,default='GCMT')
+    parser.add_argument('--link',help='URL of moment tensor link, to plot \
+        beachballs for a single event --mode',type=str,default='blank')
     parser.add_argument('--polarity', help='Flip polarity of rotation data to \
         fix data errors, to be used in specific time windows of catalog rerun \
         (default: normal, otherwise: reverse)',type=str, default='normal')
@@ -2302,9 +2303,9 @@ if __name__ == '__main__':
     parser.add_argument('--max_magnitude', help='Maximum magnitude for \
         events (default is 10).', type=float or int, default=10.0)
     parser.add_argument('--min_depth', help='Minimum depth for events in km \
-        (default is 0 km). Negative down.', type=float or int, default=0.0)
+        (default is 0 km). Positive down for IRIS.', type=float or int, default=0.0)
     parser.add_argument('--max_depth', help='Maximum depth for events in km \
-        (default is -1000).', type=float or int, default=1000.)
+        (default is 1000 km for IRIS).', type=float or int, default=1000.0)
     parser.add_argument('--min_latitude', help='Minimum latitude for events.\
         Format +/- 90 decimal degrees (default is -90°).', type=float or int,
                         default=-90.0)
@@ -2325,26 +2326,44 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
     station = args.station
-    mode = args.mode
+    mode = args.mode.upper()
     polarity = args.polarity
     instrument = args.instrument.upper()
     link = args.link
 
-    # This link leads to the quakeml webpage of a certain event on IRIS.
+    # --link should lead to the quakeml webpage of a certain event on IRIS.
     # The fetched xml provides a moment tensor data for the beachballs.
     # i.e. 'http://www.iris.edu/spudservice/momenttensor/736631/quakeml'
 
-    if station == 'RLAS' and mode == 'qmlfile':
-        print('\nDownloading events from QuakeML')
-        quakeml = './populate_database/extra_events.xml'
-        cat = read_events(quakeml, format='QUAKEML')
-        event_source = "ISC"
-        catalog='ISC'
+    # Default GCMT mode, or link mode if MT link is given
+    if mode == 'GCMT' or (mode =='link' and link != 'blank'):
+        catalog = 'GCMT'
+        event_source = 'GCMT'
+        if UTCDateTime(args.min_datetime) < UTCDateTime(2014,1,1):
+            print("\nDownloading events from NDK catalog")
+            cat_all = read_events(
+                            './populate_database/NDK_events_before2014.ndk')
+        else:
+            print("\nDownloading events from GCMT NEW QUICK")
+            # a link to quick solutions for past year
+            cat_all = read_events('http://www.ldeo.columbia.edu/~gcmt/projects/'
+                                            'CMT/catalog/NEW_QUICK/qcmt.ndk')
+
+        cat = cat_all.filter('time > '+str(args.min_datetime), 
+                            'time < '+str(args.max_datetime),
+                            'magnitude >= '+str(args.min_magnitude), 
+                            'magnitude <= '+str(args.max_magnitude),
+                            # 'depth <= '+str(args.min_depth), 
+                            # 'depth >= '+str(args.max_depth),
+                            'longitude >= '+str(args.min_longitude), 
+                            'longitude <= '+str(args.max_longitude),
+                            'latitude >= '+str(args.min_latitude), 
+                            'latitude <= '+str(args.max_latitude))
 
     elif mode == 'IRIS':
-        print('\nDownloading events from IRIS')
-        catalog='GCMT'
-        event_source = "IRIS"
+        print("\nDownloading events from IRIS")
+        catalog = 'GCMT'
+        event_source = 'IRIS'
         c = fdsnClient(event_source)
         cat = c.get_events(minmagnitude=args.min_magnitude,
                            maxmagnitude=args.max_magnitude,
@@ -2359,36 +2378,22 @@ if __name__ == '__main__':
                            endtime=args.max_datetime,
                            catalog=catalog)
 
+    elif mode == 'ISCQUAKEML':
+        print("\nDownloading events from ISC QuakeML catalog")
+        quakeml = './populate_database/extra_events.xml'
+        cat = read_events(quakeml, format='QUAKEML')
+        event_source = 'ISC'
+        catalog = 'ISC'
+
     else:
-        catalog='GCMT'
-        event_source = "GCMT"
-        if UTCDateTime(args.min_datetime) < UTCDateTime(2014,1,1):
-            print('\nDownloading events from NDK catalog')
-            cat_all = read_events(
-                            './populate_database/NDK_events_before2014.ndk')
-        else:
-            print('\nDownloading events from GCMT catalog')
-            cat_all = read_events('http://www.ldeo.columbia.edu/~gcmt/projects/'
-                                            'CMT/catalog/NEW_QUICK/qcmt.ndk')
-
-        cat = cat_all.filter('time > '+str(args.min_datetime), 
-                            'time < '+str(args.max_datetime),
-                             'magnitude >= '+str(args.min_magnitude), 
-                             'magnitude <= '+str(args.max_magnitude),
-                             # 'depth >= '+str(args.min_depth), 
-                             # 'depth <= '+str(args.max_depth),
-                             'longitude >= '+str(args.min_longitude), 
-                             'longitude <= '+str(args.max_longitude),
-                             'latitude >= '+str(args.min_latitude), 
-                             'latitude <= '+str(args.max_latitude))
-
+        sys.exit('Invalid mode')
 
     # set file output path
     output_path = './OUTPUT/'
     if not os.path.exists(output_path): 
         os.makedirs(output_path)
 
-    print('%i event(s) downloaded, beginning processing...' % len(cat))
+    print("%i event(s) downloaded, beginning processing..." % len(cat))
     contador1 = contador2 = contador3 = 0
     bars = '='*79
     error_list = []
@@ -2419,93 +2424,97 @@ if __name__ == '__main__':
 
             # i.e. 'GCMT_2017-09-23T125302_6.05_OAXACA_MEXICO'
             tag_name = '_'.join((catalog,time_tag,mag_tag,flinn_engdahl))
-            tag_name_short = '_'.join((catalog,time_tag))
 
             # i.e. './OUTPUT/GCMT_2017-09-23T125302_6.05_OAXACA_MEXICO/
             folder_name = os.path.join(output_path,tag_name) + '/' 
 
+            # short tags used to check if an event with the same time tag has 
+            # been processed because different catalogs publish diff. magnitudes
+            tag_name_short = '_'.join((catalog,time_tag))
+            folder_name_short = os.path.join(output_path,tag_name_short)
+            check_folder_exists = glob.glob(folder_name_short + '*')
+
             # check if event already processed by checking json file,
             # if new station, run waveform compare
-
-            if os.path.exists(str(folder_name)):
+            if check_folder_exists:
                 try:
                     filename_json = folder_name + tag_name + '.json'
                     data = json.load(open(filename_json))
                     if data['station_information_{}'.format(station)]:
-                        print('This event was already processed\n')
+                        print("This event was already processed\n")
                         contador1 += 1
                     else:
                         try:
                             plotWaveformComp(event, station, link, mode,
-                                            event_source, folder_name, tag_name)
+                                                        folder_name, tag_name)
                             contador2 += 1
 
                         # if any error, remove folder, continue
                         except Exception as e:
                             contador3 += 1
                             print(e)
-                            print('Removing incomplete folder...\n')
+                            print("Removing incomplete folder...\n")
                             error_list.append(tag_name)
                             shutil.rmtree(folder_name)
 
                         # if keyboard interrupt, remove folder, quit
                         except KeyboardInterrupt:
-                            print('Removing incomplete folder...\n')
+                            print("Removing incomplete folder...\n")
                             shutil.rmtree(folder_name)
                             sys.exit()
 
                 # if json not found, folder is incomplete, continue
                 except FileNotFoundError:
                     error_list.append(tag_name)
-                    print('Incomplete folder found\n')
+                    print("Incomplete folder found\n")
                     contador1 += 1 
 
             
             # event encountered for the first time, create folder, xml, process
             elif not os.path.exists(str(folder_name)):  
                 os.makedirs(str(folder_name))
-                event.write(folder_name + tag_name + '.xml', format="QUAKEML")
+                event.write(folder_name + tag_name + '.xml', format='QUAKEML')
 
                 # run processing function
                 try:
                     plotWaveformComp(event, station, link, mode,
-                                        event_source, folder_name, tag_name)
+                                                        folder_name, tag_name)
                     contador2 += 1
                 
                 # if any error, remove folder, continue
                 except Exception as e:
                     contador3 += 1
                     print(e)
-                    print('Removing incomplete folder...\n')
+                    print("Removing incomplete folder...\n")
                     error_list.append(tag_name)
                     shutil.rmtree(folder_name)
                
                 # if keyboard interrupt, remove folder, quit
                 except KeyboardInterrupt:
-                    print('Removing incomplete folder...\n')
+                    print("Removing incomplete folder...\n")
                     shutil.rmtree(folder_name)
                     sys.exit()
 
         except Exception as e:
-            print('Error in folder/tag name creation; ',e)
+            print("Error in folder/tag name creation; ",e)
 
+    # print end message
     print('{}\n'.format('_'*79))
-    print('Catalog complete, no more events to show')
-    print('From a total of %i event(s):\n %i was/were successfully processed'
-          '\n %i could not be processed \n %i already processed\n' % (
+    print("Catalog complete, no more events to show")
+    print("From a total of %i event(s):\n %i was/were successfully processed"
+          "\n %i could not be processed \n %i already processed\n" % (
               len(cat), contador2, contador3, contador1))
     
-    # write an error log to see what events failed, no reasons just tags
-    # name of errorlog is the time range searched
+    # write error log to see events failed, named by search timeframe
     if len(error_list) > 0:
         if not os.path.exists('./errorlogs'):
             os.makedirs('./errorlogs')
 
         errorlog_name = './errorlogs/wavComp_{}_{}.txt'.format(
                                 args.min_datetime[:10],args.max_datetime[:10])
-        print('Writing error log: {}'.format(errorlog_name))
+        print("Writing error log: {}".format(errorlog_name))
         with open(errorlog_name,'w') as f:
-            f.write('Error Log Created {}\n'.format(datetime.datetime.now()))
+            f.write("Error Log Created {}\n".format(datetime.datetime.now()))
             for i in error_list:
                 f.write('{}\n'.format(i))
 
