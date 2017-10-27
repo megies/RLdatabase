@@ -1385,7 +1385,7 @@ def store_info_json(rotate, ac, rt, corrcoefs, baz, arriv_p, EBA, station, phasv
 
     # if: json already created for previous station, overwrite event info
     # else: write a new json file !!! assumes the event information is the same
-    filename_json = folder_name + tag_name + '.json'
+    filename_json = os.path.join(folder_name,tag_name + '.json')
 
     if os.path.exists(filename_json): 
         dic_event = json.load(open(filename_json),object_pairs_hook=OrderedDict)
@@ -1415,8 +1415,8 @@ def store_info_xml(folder_name,tag_name,station):
     """
 
     ns = 'http://www.rotational-seismology.org'
-    filename_json = folder_name + tag_name + '.json'
-    filename_xml = folder_name + tag_name + '.xml'
+    filename_json = os.path.join(folder_name,tag_name + '.json')
+    filename_xml = os.path.join(folder_name,tag_name + '.xml')
 
     # check if xml already has extra section
     cat = read_events(pathname_or_url=filename_xml, format='QUAKEML')
@@ -1761,7 +1761,8 @@ def plotWaveformComp(event, station, link, mode, folder_name, tag_name):
         ax = plt.gca()
         ax.axis('off')
 
-    plt.savefig(folder_name + tag_name + '_{}_page_1.png'.format(station))
+    plt.savefig(os.path.join(folder_name,tag_name + 
+                                        '_{}_page_1.png'.format(station)))
     plt.close()
     print("Completed and Saved")
 
@@ -1973,7 +1974,8 @@ def plotWaveformComp(event, station, link, mode, folder_name, tag_name):
     plt.title(r'4: Later surface waves (Lowpass, cut-off: %s Hz)' % (cutoff))
     plt.grid(True)
 
-    plt.savefig(folder_name + tag_name + '_{}_page_2.png'.format(station))
+    plt.savefig(os.path.join(folder_name,tag_name + 
+                                            '_{}_page_2.png'.format(station)))
     plt.close()
     print("Completed and Saved")
 
@@ -2147,7 +2149,8 @@ def plotWaveformComp(event, station, link, mode, folder_name, tag_name):
     cb1.set_label(r'X-corr. coeff.', fontweight='bold')
     cb1.set_ticks([-1.0,-0.75,-0.5,-0.25,0.0,0.25,0.5,0.75,1.0])
     
-    plt.savefig(folder_name + tag_name + '_{}_page_3.png'.format(station))
+    plt.savefig(os.path.join(folder_name,tag_name + 
+                                            '_{}_page_3.png'.format(station)))
     plt.close()
     print("Completed and Saved")
 
@@ -2261,7 +2264,8 @@ def plotWaveformComp(event, station, link, mode, folder_name, tag_name):
     cb1.set_label(r'X-corr. coeff.', fontweight='bold')
     cb1.set_ticks([-1.0,-0.75,-0.5,-0.25,0.0,0.25,0.5,0.75,1.0])
    
-    plt.savefig(folder_name + tag_name + '_{}_page_4.png'.format(station))
+    plt.savefig(os.path.join(folder_name,tag_name + 
+                                            '_{}_page_4.png'.format(station)))
     plt.close()
     print("Completed and Saved")
 
@@ -2394,7 +2398,7 @@ if __name__ == '__main__':
         os.makedirs(output_path)
 
     print("%i event(s) downloaded, beginning processing..." % len(cat))
-    contador1 = contador2 = contador3 = 0
+    success_counter = fail_counter = already_processed = 0
     bars = '='*79
     error_list = []
     for event in cat:
@@ -2426,7 +2430,7 @@ if __name__ == '__main__':
             tag_name = '_'.join((catalog,time_tag,mag_tag,flinn_engdahl))
 
             # i.e. './OUTPUT/GCMT_2017-09-23T125302_6.05_OAXACA_MEXICO/
-            folder_name = os.path.join(output_path,tag_name) + '/' 
+            folder_name = os.path.join(output_path,tag_name)
 
             # short tags used to check if an event with the same time tag has 
             # been processed because different catalogs publish diff. magnitudes
@@ -2434,24 +2438,31 @@ if __name__ == '__main__':
             folder_name_short = os.path.join(output_path,tag_name_short)
             check_folder_exists = glob.glob(folder_name_short + '*')
 
-            # check if event already processed by checking json file,
-            # if new station, run waveform compare
+            # check if current event folder exists
             if check_folder_exists:
+                # check if event source is the same
+                if (os.path.basename(check_folder_exists[0]) != 
+                                                os.path.basename(folder_name)):
+                    print('This event was processed with another mode\n')
+                    already_processed += 1
+                    continue
+
+                # if new station, run waveform compare again
                 try:
-                    filename_json = folder_name + tag_name + '.json'
+                    filename_json = os.path.join(folder_name,tag_name + '.json')
                     data = json.load(open(filename_json))
                     if data['station_information_{}'.format(station)]:
                         print("This event was already processed\n")
-                        contador1 += 1
+                        already_processed += 1
                     else:
                         try:
                             plotWaveformComp(event, station, link, mode,
                                                         folder_name, tag_name)
-                            contador2 += 1
+                            success_counter += 1
 
                         # if any error, remove folder, continue
                         except Exception as e:
-                            contador3 += 1
+                            fail_counter += 1
                             print(e)
                             print("Removing incomplete folder...\n")
                             error_list.append(tag_name)
@@ -2465,25 +2476,25 @@ if __name__ == '__main__':
 
                 # if json not found, folder is incomplete, continue
                 except FileNotFoundError:
+                    fail_counter += 1 
                     error_list.append(tag_name)
                     print("Incomplete folder found\n")
-                    contador1 += 1 
 
             
             # event encountered for the first time, create folder, xml, process
-            elif not os.path.exists(str(folder_name)):  
+            elif not check_folder_exists:  
                 os.makedirs(str(folder_name))
-                event.write(folder_name + tag_name + '.xml', format='QUAKEML')
-
+                event.write(os.path.join(folder_name,tag_name + '.xml'), 
+                                                            format='QUAKEML')
                 # run processing function
                 try:
                     plotWaveformComp(event, station, link, mode,
                                                         folder_name, tag_name)
-                    contador2 += 1
+                    success_counter += 1
                 
                 # if any error, remove folder, continue
                 except Exception as e:
-                    contador3 += 1
+                    fail_counter += 1
                     print(e)
                     print("Removing incomplete folder...\n")
                     error_list.append(tag_name)
@@ -2491,11 +2502,14 @@ if __name__ == '__main__':
                
                 # if keyboard interrupt, remove folder, quit
                 except KeyboardInterrupt:
+                    fail_counter += 1
                     print("Removing incomplete folder...\n")
                     shutil.rmtree(folder_name)
                     sys.exit()
 
+        # if error creating tags, continue
         except Exception as e:
+            fail_counter += 1
             print("Error in folder/tag name creation; ",e)
 
     # print end message
@@ -2503,7 +2517,7 @@ if __name__ == '__main__':
     print("Catalog complete, no more events to show")
     print("From a total of %i event(s):\n %i was/were successfully processed"
           "\n %i could not be processed \n %i already processed\n" % (
-              len(cat), contador2, contador3, contador1))
+              len(cat), success_counter, fail_counter, already_processed))
     
     # write error log to see events failed, named by search timeframe
     if len(error_list) > 0:
