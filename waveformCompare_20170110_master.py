@@ -2280,6 +2280,59 @@ def plotWaveformComp(event, station, link, mode, folder_name, tag_name):
 
     print("Done\n")
 
+
+def generate_tags(event):
+
+    """
+    Generates all naming schema tags for an event and prints dialog as it does
+    :type event: :class: `~obspy.core.event.Event`
+    :param event: Contains the event information.
+    :rtype tag_name: str
+    :return tag_name: event tag i.e. 'GCMT_2017-09-23T125302_6.05_OAXACA_MEXICO'
+    :rtype folder_name: str
+    :return folder_name: folder name tag
+    :rtype check_folder_exists: list
+    :return check_folder_exists: glob list with identical file names if event 
+                                was already processed
+    """
+
+    event_information = str(event).split('\n')[0][7:]
+    flinn_engdahl = event.event_descriptions[0]['text'].upper()
+    print('{}\n{}\n{}\n{}'.format(
+                            bars,flinn_engdahl,event_information,bars))
+
+    # create tags for standard filenaming
+    # magnitude, always keep at 3 characters long, fill w/ 0's if not
+    mag_tag = '{:0^4}'.format(str(event.magnitudes[0]['mag']))
+
+    # Flinn Engdahl region, i.e. SOUTHEAST_OF_HONSHU_JAPAN
+    substitutions = [(', ', '_'),(' ','_')]
+    for search, replace in substitutions:
+        flinn_engdahl = flinn_engdahl.replace(search,replace)
+
+    # remove '.' from end of region name if necessary (i.e. _P.N.G.)
+    if flinn_engdahl[-1] == '.':
+        flinn_engdahl = flinn_engdahl[:-1]
+
+    # ISO861 Time Format, i.e. '2017-09-23T125302Z'
+    orig = event.preferred_origin() or event.origins[0]
+    time_tag = orig['time'].isoformat()[:19].replace(':','')+'Z'
+
+    # i.e. 'GCMT_2017-09-23T125302_6.05_OAXACA_MEXICO'
+    tag_name = '_'.join((catalog,time_tag,mag_tag,flinn_engdahl))
+
+    # i.e. './OUTPUT/GCMT_2017-09-23T125302_6.05_OAXACA_MEXICO/
+    folder_name = os.path.join(output_path,tag_name)
+
+    # short tags used to check if an event with the same time tag has 
+    # been processed because different catalogs publish diff. magnitudes
+    tag_name_short = '_'.join((catalog,time_tag))
+    folder_name_short = os.path.join(output_path,tag_name_short)
+    check_folder_exists = glob.glob(folder_name_short + '*')
+
+    return tag_name, folder_name, check_folder_exists
+
+
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description='Comparison of transvere\
@@ -2403,40 +2456,7 @@ if __name__ == '__main__':
     error_list = []
     for event in cat:
         try:
-            # print event divider
-            event_information = str(event).split('\n')[0][7:]
-            flinn_engdahl = event.event_descriptions[0]['text'].upper()
-            print('{}\n{}\n{}\n{}'.format(
-                                    bars,flinn_engdahl,event_information,bars))
-
-            # create tags for standard filenaming
-            # magnitude, always keep at 3 characters long, fill w/ 0's if not
-            mag_tag = '{:0^4}'.format(str(event.magnitudes[0]['mag']))
-
-            # Flinn Engdahl region, i.e. SOUTHEAST_OF_HONSHU_JAPAN
-            substitutions = [(', ', '_'),(' ','_')]
-            for search, replace in substitutions:
-                flinn_engdahl = flinn_engdahl.replace(search,replace)
-
-            # remove '.' from end of region name if necessary (i.e. _P.N.G.)
-            if flinn_engdahl[-1] == '.':
-                flinn_engdahl = flinn_engdahl[:-1]
-
-            # ISO861 Time Format, i.e. '2017-09-23T125302Z'
-            orig = event.preferred_origin() or event.origins[0]
-            time_tag = orig['time'].isoformat()[:19].replace(':','')+'Z'
-
-            # i.e. 'GCMT_2017-09-23T125302_6.05_OAXACA_MEXICO'
-            tag_name = '_'.join((catalog,time_tag,mag_tag,flinn_engdahl))
-
-            # i.e. './OUTPUT/GCMT_2017-09-23T125302_6.05_OAXACA_MEXICO/
-            folder_name = os.path.join(output_path,tag_name)
-
-            # short tags used to check if an event with the same time tag has 
-            # been processed because different catalogs publish diff. magnitudes
-            tag_name_short = '_'.join((catalog,time_tag))
-            folder_name_short = os.path.join(output_path,tag_name_short)
-            check_folder_exists = glob.glob(folder_name_short + '*')
+            tag_name, folder_name, check_folder_exists = generate_tags(event)
 
             # check if current event folder exists
             if check_folder_exists:
