@@ -272,8 +272,8 @@ def event_info_data(event, station, mode, polarity, instrument):
         # broadband station signal
         # assuming all translation data comes from same source
         acE,srcTR = download_data(startev, net_s, sta_s, loc_s, chan2, source)
-        acN,srcTR = download_data(startev,  net_s, sta_s, loc_s, chan3, source)
-        acZ,srcTR = download_data(startev,  net_s, sta_s, loc_s, chan4, source)
+        acN,srcTR = download_data(startev, net_s, sta_s, loc_s, chan3, source)
+        acZ,srcTR = download_data(startev, net_s, sta_s, loc_s, chan4, source)
         ac = Stream(traces=[acE[0], acN[0], acZ[0]])
         for ca in [ac[0], ac[1], ac[2], rt[0]]:
             ca.stats.coordinates = AttribDict()
