@@ -419,7 +419,7 @@ def resample(is_local, baz, rt, ac):
     :return ac_pcoda: (Decimated) copy of the three component broadband
         station signal for p-coda calculation.
     :rtype sec: int
-    :return sec: Sampling rate.
+    :return sec: Time window length.    
     :rtype cutoff: float
     :return cutoff: Cut-off frequency for the lowpass filter.
     :rtype cutoff_pc: float
@@ -947,7 +947,7 @@ def Get_corrcoefs(rotra, rodat, acstr, rotate_array, sec, station):
     :type rotate_array: numpy.ndarray
     :param rotate_array:
     :type sec: int
-    :param sec: Sampling rate.
+    :param sec: Time window length.
     :type station: str
     :param station: Station from which data are fetched (i.e. 'RLAS').
     :rtype corrcoefs: numpy.ndarray
@@ -957,14 +957,14 @@ def Get_corrcoefs(rotra, rodat, acstr, rotate_array, sec, station):
     """
     compE, compN = station_components(station)
 
-    rotra_SR = int(rotra.stats.sampling_rate)
-    compN_SR = int(acstr.select(component=compN)[0].stats.sampling_rate)
+    # sampling rate 
+    rotra_SR = int(rotra.stats.sampling_rate * sec)
+    compN_SR = int(acstr.select(component=compN)[0].stats.sampling_rate * sec)
 
     corrcoefs = []
-    for i5 in range(0, len(rodat) // (rotra_SR * sec)):
-        coeffs = xcorr(rodat[rotra_SR * sec * i5:rotra_SR * sec * (i5 + 1)],
-                       rotate_array[compN_SR * sec * i5:
-                                            compN_SR * sec * (i5 + 1)], 0)
+    for i in range(0, len(rodat) // rotra_SR):
+        coeffs = xcorr(rodat[i*rotra_SR:(i+1)*rotra_SR],
+                       rotate_array[i*compN_SR:(i+1)*compN_SR ], 0)
 
         corrcoefs.append(coeffs[1])
 
@@ -987,7 +987,7 @@ def backas_analysis(rotra, rodat, acstr, sec, corrcoefs, ind, station):
     :type acstr: :class: `~obspy.core.stream.Stream`
     :param acstr: Three component broadband station signal.
     :type sec: int
-    :param sec: Sampling rate.
+    :param sec: Time window length.
     :type corrcoefs: numpy.ndarray
     :param corrcoefs: Correlation coefficients.
     :type ind: int
@@ -1107,7 +1107,7 @@ def phase_vel(rt, sec, corrcoefs, rotate, corrsum, backas2, ind_band, ind_surf):
     :type rt: :class: `~obspy.core.stream.Stream`
     :param rt: Rotational signal from ringlaser.
     :type sec: int
-    :param sec: Sampling rate.
+    :param sec: Time window length.
     :type corrcoefs: numpy.ndarray
     :param corrcoefs: Correlation coefficients.
     :type rotate: :class: `~obspy.core.stream.Stream`
@@ -2460,7 +2460,7 @@ if __name__ == '__main__':
 
             # check if current event folder exists
             if check_folder_exists:
-                # check if event source is the same
+                # check if event source is the same, assumes 0 or 1 files found
                 if (os.path.basename(check_folder_exists[0]) != 
                                                 os.path.basename(folder_name)):
                     print('This event was processed with another mode\n')
