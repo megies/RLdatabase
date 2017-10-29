@@ -238,6 +238,9 @@ def event_info_data(event, station, mode, polarity, instrument):
     startev = origin.time
 
     if station == 'RLAS':
+        station_lat = 49.144001
+        station_lon = 12.8782
+
         source = ['http://eida.bgr.de', 
                   'http://erde.geophysik.uni-muenchen.de']
 
@@ -265,14 +268,10 @@ def event_info_data(event, station, mode, polarity, instrument):
             data_sources[channels] = srcTR
             ac += tr
 
-        for ca in [ac[0], ac[1], ac[2], rt[0]]:
-            ca.stats.coordinates = AttribDict()
-            ca.stats.coordinates['longitude'] = 12.8782
-            ca.stats.coordinates['latitude'] = 49.144001
-            ca.stats['starttime'] = startev - 180
-            ca.stats['sampling_rate'] = 20.
-
     elif station == 'ROMY':
+        station_lat = 48.162941
+        station_lon = 11.275476
+
         source = ['http://eida.bgr.de', 
                   'http://erde.geophysik.uni-muenchen.de']
 
@@ -293,23 +292,22 @@ def event_info_data(event, station, mode, polarity, instrument):
             data_sources[channels] = srcTR
             ac += tr
         
-        for ca in [ac[0], ac[1], ac[2], rt[0]]:
-            ca.stats.coordinates = AttribDict()
-            ca.stats.coordinates['longitude'] = 11.275476
-            ca.stats.coordinates['latitude'] = 48.162941
-            ca.stats['starttime'] = startev - 180
-            ca.stats['sampling_rate'] = 20.
-
     # coordinates, theoretical event backazimuth and distance
     event_lat = origin.latitude
     event_lon = origin.longitude
     depth = origin.depth * 0.001  # Depth in km
-    baz = gps2dist_azimuth(lat1 = event_lat, 
-                            lon1 =  event_lon, 
-                            lat2 = rt[0].stats.coordinates.latitude,
-                            lon2 = rt[0].stats.coordinates.longitude)
+    dist_baz = gps2dist_azimuth(lat1 = event_lat, lon1 =  event_lon, 
+                           lat2 = station_lat, lon2 = station_lon)
+
+    for ca in [ac[0], ac[1], ac[2], rt[0]]:
+        ca.stats.coordinates = AttribDict()
+        ca.stats.coordinates['longitude'] = station_lat
+        ca.stats.coordinates['latitude'] = station_lon
+        ca.stats['back_azimuth'] = dist_baz[2]
+        ca.stats['starttime'] = startev - 180
+        ca.stats['sampling_rate'] = 20.
     
-    return event_lat, event_lon, depth, startev, rt, ac, baz, data_sources
+    return event_lat, event_lon, depth, startev, rt, ac, dist_baz, data_sources
 
 
 def station_components(station):
@@ -335,21 +333,19 @@ def station_components(station):
     return compE, compN
 
 
-def is_local(baz):
+def is_local(distance):
 
     """
     Checks whether the event is close (< 333.33 km), local (< 1111.1 km) or
     non-local.
 
-    :type baz: tuple
-      :param baz: [0] Great circle distance in m, 
-                  [1] azimuth A->B in degrees,
-                  [2] backazimuth B->A in degrees.
+    :type distance: float
+    :param distance: event station distance in km
     :rtype: str
     :return: Self-explaining string for event distance.
     """
-    if 0.001 * baz[0] / 111.11 < 10.0:
-        if 0.001 * baz[0] / 111.11 < 3.0:
+    if 0.001 * distance / 111.11 < 10.0:
+        if 0.001 * distance / 111.11 < 3.0:
             is_local = 'close'
         else:
             is_local = 'local'
@@ -394,7 +390,7 @@ def get_moment_tensor_magnitude(link):
     return MomentTensor, Magnitude, Region
 
 
-def resample(is_local, baz, rt, ac):
+def resample(is_local, rt, ac):
 
     """
     Resamples signal accordingly with sampling rates and cut-off frequencies
@@ -438,6 +434,7 @@ def resample(is_local, baz, rt, ac):
         rt.decimate(factor=4)
         ac.decimate(factor=4)
         sec = 120 # Length of time window in seconds
+        sec_p = 5 # Pcoda time window in seconds
         cutoff = 1.0 # Cut-off freq for the lowpass filter
     elif is_local == 'local':
         for trr in (rt + ac):
@@ -447,6 +444,7 @@ def resample(is_local, baz, rt, ac):
         rt.decimate(factor=2)
         ac.decimate(factor=2)
         sec = 5 
+        sec_p = 2
         cutoff = 2.0  
     elif is_local == 'close':
         for trr in (rt + ac):
@@ -456,9 +454,10 @@ def resample(is_local, baz, rt, ac):
         rt.decimate(factor=2)
         ac.decimate(factor=2)
         sec = 3
+        sec_p = 2
         cutoff = 4.0  
 
-    return rt, ac, rt_pcoda, ac_pcoda, sec, cutoff, cutoff_pc
+    return rt, ac, rt_pcoda, ac_pcoda, sec, sec_p, cutoff, cutoff_pc
 
 
 def remove_instr_resp(rt, ac, rt_pcoda, ac_pcoda, station, startev):
@@ -661,57 +660,59 @@ def filter_and_rotate(ac, rt, baz, rt_pcoda, ac_pcoda, cutoff, cutoff_pc,
     number_of_bands = len(freq_list) - 1
     
     # copies for phase velocities and pcoda analysis
+    ac_pcoda_full = ac.copy()
+    rt_pcoda_full = rt.copy()
     rt_bands = [rt.copy() for _ in range(number_of_bands)]
     rotate_bands = [ac.copy() for _ in range(number_of_bands)]
-    cop_ac = ac.copy()
-    cop_rt = rt.copy()
 
     # filter streams high and low
     ac.filter('lowpass', freq=cutoff, corners=2, zerophase=True)
     rt.filter('lowpass', freq=cutoff, corners=2, zerophase=True)
     ac.filter('highpass', freq=0.005, corners=2, zerophase=True)
     rt.filter('highpass', freq=0.005, corners=2, zerophase=True)
-    cop_ac.filter('highpass', freq=cutoff_pc, corners=2, zerophase=True)
-    cop_rt.filter('highpass', freq=cutoff_pc, corners=2, zerophase=True)
+    ac_pcoda_full.filter('highpass', freq=cutoff_pc, corners=2, zerophase=True)
+    rt_pcoda_full.filter('highpass', freq=cutoff_pc, corners=2, zerophase=True)
 
-    # filter out secondary microseisms for non-local events
+    # filter out secondary microseisms (5-12s) for non-local events
     if is_local == "non-local":    
-        ac.filter('bandstop', freqmin=0.083, freqmax=0.2, 
+        ac.filter('bandstop', freqmin=1/12, freqmax=1/5, 
                                 corners=4, zerophase=True)
-        rt.filter('bandstop', freqmin=0.083, freqmax=0.2, 
+        rt.filter('bandstop', freqmin=1/12, freqmax=1/5, 
                                 corners=4, zerophase=True)
 
     # rotate translational signals to theoretical event backazimuth
     rotate = ac.copy()
-    pcod_rotate = cop_ac.copy()
-    pcoda_rotate = ac_pcoda.rotate()
+    pcoda_rotate = ac_pcoda.copy()
+    pcoda_rotate_full = ac_pcoda_full.copy()
 
-    rotate.rotate(method = 'NE->RT', backazmiuth = baz[2])
-    pcod_rotate.rotate(method = 'NE->RT', backazmiuth = baz[2])
-    pcoda_rotate.rotate(method = 'NE->RT', backazmiuth = baz[2])
+    rotate.rotate(method = 'NE->RT')
+    pcoda_rotate.rotate(method = 'NE->RT')
+    pcoda_rotate_full.rotate(method = 'NE->RT')
     
-    # for varying frequency bands, rotate to BAz, filter both RT and Rotate, 
+    # for varying frequency bands, rotate to BAz, filter both RT and Rotate 
     for I in range(number_of_bands):
-        rotate_bands[I].rotate(method='NE->RT', backazimuth = baz[2])
+        rotate_bands[I].rotate(method='NE->RT')
 
         for band_select in [rt_bands[I],rotate_bands[I]]:
-            band_select[I].filter(type = 'bandpass',
+            band_select[0].filter(type = 'bandpass',
                                 freqmin = freq_list[I],
                                 freqmax = freq_list[I+1],
                                 corners = 3,
                                 zerophase = True)
-    
-    # copy pcoda and filter for BAz analysis
-    frtp = rt_pcoda.copy()
-    facp = ac_pcoda.copy()
-    frotate = facp.copy()
-    frtp.filter('highpass', freq=cutoff_pc, corners=2, zerophase=True)
-    facp.filter('highpass', freq=cutoff_pc, corners=2, zerophase=True)
-    frotate.rotate(method = 'NE->RT', backazmiuth = baz[2])
+
+    # Filter Pcoda for BAz analysis
+    filt_rt_pcoda = rt_pcoda.copy()
+    filt_ac_pcoda = ac_pcoda.copy()
+    filt_rotate = filt_ac_pcoda.copy()
+    filt_rt_pcoda.filter('highpass', freq=cutoff_pc, corners=2, zerophase=True)
+    filt_ac_pcoda.filter('highpass', freq=cutoff_pc, corners=2, zerophase=True)
+    filt_rotate.filter('highpass', freq=cutoff_pc, corners=2, zerophase=True)
+    filt_rotate.rotate(method = 'NE->RT')
 
 
-    return rotate, pcod_rotate, pcoda_rotate, frtp, facp, frotate, cop_rt,\
-                                                    rt_bands, rotate_bands
+    return rt_bands, rotate_bands, rotate, rt_pcoda_full, pcoda_rotate_full, \
+            filt_rt_pcoda, filt_ac_pcoda, filt_rotate 
+
 
 
 def ps_arrival_times(distance, depth, init_sec):
@@ -740,7 +741,7 @@ def ps_arrival_times(distance, depth, init_sec):
                                 distance_in_degree=0.001 * distance / 111.11, 
                                 source_depth_in_km=depth)
     
-    times_p,time_s = [],[]
+    times_p,times_s = [],[]
     # from all possible P arrivals, select the earliest 
     pwave_list = ['P','p','Pdiff','PKiKP','PKIKP','PP','Pb','Pn','Pg']
     for i2 in range(len(tt)):
@@ -762,16 +763,17 @@ def ps_arrival_times(distance, depth, init_sec):
     return arriv_p, arriv_s
 
 
-def time_windows(baz, arriv_p, arriv_s, init_sec, is_local):
+def time_windows(DS, arriv_p, arriv_s, init_sec, is_local):
     """
     Determines time windows for arrivals and subplots for P-waves,
-    S-waves, initial and latter surface waves. Window lengths dependent on event distance
+    S-waves, initial and latter surface waves. 
+    Window lengths dependent on event distance.
+    Keep all values integers, as they are used for slice indexing
 
 
-    :type baz: tuple
-    :param baz: [0] Great circle distance in m, 
-                [1] azimuth A->B in degrees,
-                [2] backazimuth B->A in degrees.
+
+    :type DS: float
+    :param DS: event station distance in km
     :type arriv_p: float
     :param arriv_p: Arrival time of the first P-wave.
     :type arriv_s: float
@@ -780,47 +782,46 @@ def time_windows(baz, arriv_p, arriv_s, init_sec, is_local):
     :param init_sec: Initial time of the event in sec in the fetched data.
     :type is_local: str
     :param is_local: Self-explaining string for event distance.
-    :rtype min_pw: float
+    :rtype: int
     :return min_pw: Starttime for P-waves window.
-    :rtype max_pw: Endtime for P-waves window.
+    :return max_pw: Endtime for P-waves window.
     :return min_sw: Starttime for S-waves window.
-    :rtype max_sw: Endtime for S-waves window.
+    :return max_sw: Endtime for S-waves window.
     :return min_lwi: Starttime for initial surface-waves window.
-    :rtype max_lwi: Endtime for initial surface-waves window.
+    :return max_lwi: Endtime for initial surface-waves window.
     :return min_lwf: Starttime for latter surface-waves window.
-    :rtype max_lwf: Endtime for latter surface-waves window.
+    :return max_lwf: Endtime for latter surface-waves window.
     """
-    # TIME WINDOWS (for arrivals and subplots)
-    if is_local == 'non-local':
-        min_pw = arriv_p
-        max_pw = min_pw + (arriv_s - arriv_p) // 4
-        min_sw = arriv_s - 0.001 * (arriv_s - arriv_p)
-        max_sw = arriv_s + 150
-        min_lwi = surf_tts(baz[0], init_sec) - 20
-        t1 = (baz[0]/1000000) * 50 # 50 sec per 1000 km. 
-        max_lwi = min_lwi + t1
-        min_lwf = max_lwi
-        t2 = (baz[0]/1000000) * 60 # 60 sec per 1000 km.
-        max_lwf = min_lwf + t2
-    elif is_local == 'local':
-        min_pw = arriv_p
-        max_pw = min_pw + 20
-        min_sw = arriv_s - 5
-        max_sw = min_sw + 20
-        min_lwi = surf_tts(baz[0], init_sec) + 20
-        max_lwi = min_lwi + 50
-        min_lwf = max_lwi
-        max_lwf = min_lwf + 80
-    elif is_local == 'close':
-        min_pw = arriv_p
-        max_pw = min_pw + 7
-        min_sw = arriv_s
-        max_sw = min_sw + 7
-        min_lwi = surf_tts(baz[0], init_sec) + 5
-        max_lwi = min_lwi + 12
-        min_lwf = max_lwi
-        max_lwf = min_lwf + 80
 
+    if is_local == 'non-local':
+        min_pw = int(arriv_p)
+        max_pw = int(min_pw + (arriv_s - arriv_p) // 4)
+        min_sw = int(round(arriv_s - 0.001 * (arriv_s - arriv_p)))
+        max_sw = int(arriv_s + 150)
+        min_lwi = int(round(surf_tts(DS, init_sec) - 20))
+        max_lwi = int(min_lwi + round((DS/1E6) * 50)) # 50 sec per 1000 km. 
+        min_lwf = int(max_lwi)
+        max_lwf = int(min_lwf + round((DS/1E6) * 60)) # 60 sec per 1000 km.
+    elif is_local == 'local':
+        min_pw = int(arriv_p)
+        max_pw = int(min_pw + 20)
+        min_sw = int(arriv_s - 5)
+        max_sw = int(min_sw + 20)
+        min_lwi = int(round(surf_tts(DS, init_sec) + 20))
+        max_lwi = int(min_lwi + 50)
+        min_lwf = int(max_lwi)
+        max_lwf = int(min_lwf + 80)
+    elif is_local == 'close':
+        min_pw = int(arriv_p)
+        max_pw = int(min_pw + 7)
+        min_sw = int(arriv_s)
+        max_sw = int(min_sw + 7)
+        min_lwi = int(round(surf_tts(DS, init_sec) + 5))
+        max_lwi = int(min_lwi + 12)
+        min_lwf = int(max_lwi)
+        max_lwf = int(min_lwf + 80)
+
+    # I wrote a dictionary but it's not so useful...
     # arrivals = {'pwave_start': min_pw,
     #             'pwave_end': max_pw,
     #             'swave_start': min_sw,
@@ -882,11 +883,11 @@ def surf_tts(distance, start_time):
     return arrival
 
 
-def get_corrcoefs(rt, rotate, sec, station):
+def get_corrcoefs(streamA, streamB, sec, station):
 
     """
-    Calculates the zero-lag correlation coefficients between the ringlaser
-    data and the broadband station data.
+    Calculates the zero-lag correlation coefficients between two streams
+    *StreamA and StreamB data lengths need to be the same.
 
     :type rt: :class: `~obspy.core.trace.Trace`
     :param rt: Trace of the rotational data from ringlaser.
@@ -907,18 +908,17 @@ def get_corrcoefs(rt, rotate, sec, station):
     """
     compE, compN = station_components(station)
 
-    # sampling rate 
-    rot_SR = int(rt[0].stats.sampling_rate * sec)
-    tra_SR = int(rotate[0].stats.sampling_rate * sec)
+    # time window in samples
+    strA_TW = int(streamA[0].stats.sampling_rate * sec)
+    strB_TW = int(streamB[0].stats.sampling_rate * sec)
 
     corrcoefs = []
-    rodat = rt[0].data
-    for i in range(0, len(rodat) // rot_SR):
-        coeffs = correlate(a = rodat[i*rot_SR:(i+1)*rot_SR],
-                           b = rotate[i*tra_SR:(i+1)*tra_SR], 
+    for i in range(0, len(streamA[0].data) // strA_TW):
+        coeffs = correlate(a = streamA[0].data[i*strA_TW:(i+1)*strA_TW],
+                           b = streamB[0].data[i*strB_TW:(i+1)*strB_TW], 
                            shift=0)
 
-        corrcoefs.append(coeffs[1])
+        corrcoefs.append(coeffs[0])
 
     corrcoefs = np.asarray(corrcoefs)
     thres = 0.75 * np.ones(len(corrcoefs) + 1)
@@ -926,11 +926,14 @@ def get_corrcoefs(rt, rotate, sec, station):
     return corrcoefs, thres
 
 
-def backas_analysis(rt, ac, sec, corrcoefs, ind, station):
+def baz_analysis(streamA, streamB, sec, station):
 
     """
     Backazimuth analysis: Computes the correlation coefficients for
     the backazimuth and backazimuth values.
+    For each time window, loop through all backazimuth values, calculate 
+    correlations for each backazimuth, iterate over entire trace time
+    *streamA and streamB need to be the same length
 
     :type rt: :class: `~obspy.core.trace.Trace`
     :param rt: Trace of the rotational data from ringlaser.
@@ -956,42 +959,44 @@ def backas_analysis(rt, ac, sec, corrcoefs, ind, station):
     """
     compE, compN = station_components(station)
 
-    rot_SR = int(rt[0].stats.sampling_rate * sec)
-    tra_SR = int(ac[0].stats.sampling_rate * sec) # check
+    # time window in samples
+    strA_TW = int(streamA[0].stats.sampling_rate * sec)
+    strB_TW = int(streamB[0].stats.sampling_rate * sec)
 
+    # create a list of backazimuths to iterate over
     step = 10
+    corr_length = len(streamA[0].data) // strA_TW
     backas = np.linspace(0, 360 - step, 360 / step)
     
+    # iterate over BAz and length of correlation trace
     corrbaz_list = []
     for i in range(0, len(backas)):
-        for j in range(0, len(corrcoefs)):
-            rotate = ac.copy()
-            rotate.rotate(
-                method='NE->RT',backazimuth = backas[i]).select(component='T')
-            corrbaz = correlate(a = rt[0].data[j*rot_SR:(j+1)*rot_SR],
-                                b = rotate[0].data[j*tra_SR:(j+1)*tra_SR],
+        for j in range(0, corr_length):
+            corrbaz = correlate(a = streamA[0].data[j*strA_TW:(j+1)*strA_TW],
+                                b = streamB[0].data[j*strB_TW:(j+1)*strB_TW],
                                 shift = 0)
             corrbaz_list.append(corrbaz[0])
 
-    
     corrbaz_list = np.asarray(corrbaz_list)
-    corrbaz_list = corrbaz_list.reshape(len(backas), len(corrcoefs))
+    corrbaz_list = corrbaz_list.reshape(len(backas), corr_length)
 
+    # find maximum correlations
     maxcorr_list = []
-    for k in range(0, len(corrcoefs)):
+    for k in range(0, corr_length):
         maxcorr = backas[corrbaz_list[:,k].argmax()]
-        maxcorr_list.append(maxcor_r)
+        maxcorr_list.append(maxcorr)
 
-    maxcorr = np.asarray(maxcorr)
-    coefs = []
-    # array containing max. x-corr coef for each window
-    for l in range(0,len(corrcoefs)):
-        coefs.append(np.max(corrbaz[:,l]))
+    maxcorr_list = np.asarray(maxcorr_list)
 
-    return corrbaz, maxcorr, backas, coefs
+    # array containing max corr coef for each window
+    coefs = []    
+    for l in range(0, corr_length):
+        coefs.append(np.max(corrbaz_list[:,l]))
+
+    return corrbaz_list, maxcorr_list, backas, coefs
 
 
-def backas_swave_est(rt, ac, min_sw, max_lwf, station):
+def estimate_baz(rt, trv_acc, start_sw, end_sw, station):
     """
     Calculates the sum of all correlation coefficients above a certain
     threshold (0.9) within S-waves and surface waves for each backazimuth.
@@ -1009,48 +1014,52 @@ def backas_swave_est(rt, ac, min_sw, max_lwf, station):
     :rtype corrsum: list of floats
     :return corrsum: Sum of all correlation coefficients above a certain
         threshold (0.9) within S-waves and surface waves for each backazimuth.
-    :rtype backas2: numpy.ndarray
-    :return backas2: Vector containing backazimuths (step: 1°).
+    :rtype baz_list: numpy.ndarray
+    :return baz_list: Vector containing backazimuths (step: 1°).
     """
     compE, compN = station_components(station)
 
-    sec = 30
-    rot_SR = int(rt[0].stats.sampling_rate)
-    rot_SR_sec = int(rt[0].stats.sampling_rate * sec)
+    # set integer sampling rates
+    rt_SR = int(rt[0].stats.sampling_rate)
+    trv_SR = int(trv_acc[0].stats.sampling_rate)
+    
+    # time window in samples
+    sec_internal = 30
+    rt_TW = sec_internal * rt_SR
+    trv_TW = sec_internal * trv_SR
 
-    # sample number of surface wave start and end
-    min_sw_rt = int(round(min_sw*rot_SR))
-    max_lwf_rt = int(round(max_lwf*rot_SR))
+    # sample number of surface wave start/end
+    start_sample = start_sw * rt_SR
+    end_sample = end_sw * trv_SR
 
     # cut streams at surface waves
-    rt_sfc = rt[0].data[min_sw_rt:max_lwf_rt]
-    acN_sfc = ac[0].select(component='N').data[min_sw_rt:max_lwf_rt]
-    acE_sfc = ac[0].select(component='E').data[min_sw_rt:max_lwf_rt]
+    rt_cut = rt[0].data[start_sample:end_sample]
+    trv_cut = trv_acc[0].data[start_sample:end_sample]
 
     step = 1
-    BAz = np.linspace(0, int(360 - step), int(360 / step)) # BAz array
-    corrbaz_list = []
+    baz_list = np.linspace(0, int(360 - step), int(360 / step)) # BAz array
+    
     # iterate over all BAz values, correlate in time windows
-    for i in range(len(BAz)):
-        for j in range(len(rt_sfc) // rot_SR_sec):
-            acT_sfc = rotate_ne_rt(n = acN_sfc, e = acE_sfc, ba = BAz[i])
-            corrbaz = correlate(a = rt_sfc[j*rot_SR_sec:(j+1)*rot_SR_sec],
-                                b = acT_sfc[j*rot_SR_sec:(j+1)*rot_SR_sec],
-                                shift = 0)  
+    corr_list = []
+    for i in range(len(baz_list)):
+        for j in range(len(rt_cut) // rt_TW):
+            corr = correlate(a = rt_cut[j*rt_TW:(j+1)*rt_TW],
+                             b = trv_cut[j*trv_TW:(j+1)*trv_TW],
+                             shift = 0)  
 
-            corrbaz_list.append(corrbaz[0])
+            corr_list.append(corr[0])
 
-    corrbaz_list = np.asarray(corrbaz_list)
-    corrbaz_list = corrbaz_list.reshape(
-                            len(BAz),int(round(len(corrbz_lista)/len(backas))))
+    corr_list = np.asarray(corr_list)
+    corr_list = corr_list.reshape(
+                        len(baz_list),int(round(len(corr_list)/len(baz_list))))
     
     # iterate over correlations, choose those > 0.9
     corrsum_list = []
-    for k in range(len(corrbaz_list[:, 0])):
+    for k in range(len(corr_list[:,0])):
         bazsum = []
-        for l in range(len(corrbaz_list[0, :])):
-            if corrbaz_list[k, l] >= 0.9:
-                bazsum.append(corrbaz_list[k, l])
+        for l in range(len(corr_list[0, :])):
+            if corr_list[k, l] >= 0.9:
+                bazsum.append(corr_list[k, l])
             else:
                 bazsum.append(0.0)
 
@@ -1058,13 +1067,21 @@ def backas_swave_est(rt, ac, min_sw, max_lwf, station):
         bazsum = sum(bazsum)
         corrsum_list.append(bazsum)
 
-    best_ebaz = backas2[np.asarray(corrsum).argmax()] # = EBA!
-    max_ebaz_xcoef = np.max(corrbaz2[int(best_ebaz)]) # maximum corr. coeff. for EBA
+    # best backazimuth estimated, and maximum correlations for that BAz
+    corrsum_list = np.asarray(corrsum_list)
+    best_ebaz = baz_list[corrsum_list.argmax()] 
+    max_ebaz_xcoef = np.max(corr_list[int(best_ebaz)]) 
 
-    return corrsum_list, BAz, max_ebaz_xcoef, best_ebaz
+    # Determine estimated Backazimuth
+    if max(corrsum_list) == 0.0:
+        EBA = np.nan
+    else:
+        EBA = best_ebaz
+
+    return corrsum_list, baz_list, max_ebaz_xcoef, EBA
 
 
-def phase_vel(rt, sec, corrcoefs, rotate, corrsum, backas, ind_band, ind_surf):
+def get_phase_vel(rt, trv_acc, sec, corrcoefs, surf_start, band_check):
 
     """
     Calculates the phase velocities and the estimated backazimuth.
@@ -1081,41 +1098,38 @@ def phase_vel(rt, sec, corrcoefs, rotate, corrsum, backas, ind_band, ind_surf):
     :type corrsum: list of floats
     :param corrsum: Sum of all correlation coefficients above a certain
         threshold (0.9) within S-waves and surface waves for each backazimuth.
-    :type backas2: numpy.ndarray
-    :param backas2: Vector containing backazimuths (step: 1°).
+    :type baz_list: numpy.ndarray
+    :param baz_list: Vector containing backazimuths (step: 1°).
     :rtype phasv: numpy.ndarray
     :return phasv: Phase velocities of the seismic signal.
     :rtype EBA: float
     :return EBA: Estimated backazimuth.
     """
+    # time window in samples
+    rt_TW = int(rt[0].stats.sampling_rate * sec)
+    trv_TW = int(trv_acc[0].stats.sampling_rate * sec)
 
-    rot_SR = int(rt[0].stats.sampling_rate * sec)
-
-    phasv = []
     # if dealing with freq bands, start at ind_surf
-    if ind_band:  
-        start_range = ind_surf
-    elif not ind_band:
-        start_range = 0
+    if band_check:  
+        start = surf_start
+    elif not band_check:
+        start = 0
 
     # calculate phase velocity (km/s) for correlations >= 0.75
-    for i in range(start_range, len(corrcoefs)):
+    phasv_list = []
+    for i in range(start, len(corrcoefs)):
         if corrcoefs[i] >= 0.75:
-            phas_v = (.001 * 0.5 * max(rotate[1][i*rot_sr:(i+1)*rot_SR]) / 
-                                  max(rt[0].data[i*rot_SR:(i+1)*rot_SR]))
+            phasv = (max(trv_acc[0].data[i*trv_TW:(i+1)*trv_TW]) / 
+                     max(rt[0].data[i*rt_TW:(i+1)*rt_TW]))
+            phasv *= (1/2) * (1E-3)
         else:
-            phas_v = np.NaN
-        phasv.append(phas_v)
+            phasv = np.NaN
 
-    phasv = np.asarray(phasv)  
+        phasv_list.append(phasv)
 
-    # Determine estimated Backazimuth
-    if max(np.asarray(corrsum)) == 0.0:
-        EBA = np.nan
-    else:
-        EBA = backas[np.asarray(corrsum).argmax()] 
+    phasv_list = np.asarray(phasv_list)  
 
-    return phasv,EBA
+    return phasv_list
 
 
 def sn_ratio(full_signal, p_arrival, sampling_rate):
@@ -1192,14 +1206,14 @@ def store_info_json(rotate, ac, rt, corrcoefs, baz, arriv_p, EBA, station,
     catalog = orig.creation_info.author or orig.creation_info.agency_id
     magnitude = event.preferred_magnitude() or event.magnitudes[0] # Mag info.
 
-    PAT = max(rotate[1])  # Peak transverse acceleration [nm/s]
+    PAT = max(trv_acc[0].data)  # Peak transverse acceleration [nm/s]
     PRZ = max(rt[0].data)  # Peak vertical rotation rate [nrad/s]
     PCC = max(corrcoefs)  # Peak correlation coefficient
     MCC = min(corrcoefs) # Minimum correlation coefficient
-    TBA = baz[2]  # Theoretical backazimuth [°]
-    DS_KM = 0.001 * baz[0] # Epicentral Distance [km]
+    TBA = BAz  # Theoretical backazimuth [°]
+    DS_KM = 0.001 * DS # Epicentral Distance [km]
     DS_DEG =  DS_KM / 111.11 # Epicentral Distance [°]
-    SNT = sn_ratio(rotate[1], arriv_p, ac.select(component=compN)[0].
+    SNT = sn_ratio(trv_acc[0].data, arriv_p, ac.select(component=compN)[0].
                                         stats.sampling_rate)  # Transv. Acc SNR
     SNR = sn_ratio(rt[0].data, arriv_p, rt[0].stats.sampling_rate) # SNR for RR
 
@@ -1446,9 +1460,14 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
     :param tag_name: Handle of the event.
     """
 
-    # event information:
-    event_lat, event_lon, depth, startev, rt, ac, baz, data_sources = \
+    # gather event information, stream obsjects etc.
+    event_lat, event_lon, depth, startev, rt, ac, dist_baz, data_sources = \
         event_info_data(event, station, mode, polarity, instrument)
+    
+    # distance in km, backazimuth in deg
+    DS = dist_baz[0]
+    BAz = dist_baz[2]
+
     station_lat = rt[0].stats.coordinates.latitude
     station_lon = rt[0].stats.coordinates.longitude
 
@@ -1467,8 +1486,8 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
     #               Create map with event location & information
     #
     # =========================================================================
-    print("\nPage 1, map with station, event and great circle")
-    if is_local(baz) == 'local':
+    print("\nPage 1 > Title Card...", end=" ")
+    if is_local(DS) == 'local':
         plt.figure(figsize=(18, 9))
         plt.subplot2grid((4, 9), (0, 4), colspan=5, rowspan=4)
 
@@ -1483,7 +1502,7 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
         map.drawmeridians(np.arange(0., 360., 5.), labels=[1, 0, 0, 1])
         map.drawstates(linewidth=0.25)
 
-    elif is_local(baz) == 'non-local' and baz[0] <= 13000000:
+    elif is_local(DS) == 'non-local' and DS <= 13000000:
         plt.figure(figsize=(18, 9))
         plt.subplot2grid((4, 9), (0, 4), colspan=5, rowspan=4)
 
@@ -1495,7 +1514,7 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
         map.drawmeridians(np.arange(0, 360, 30))
         map.drawparallels(np.arange(-90, 90, 30))
 
-    elif is_local(baz) == 'non-local' and baz[0] > 13000000:
+    elif is_local(DS) == 'non-local' and DS > 13000000:
         plt.figure(figsize=(18, 9))
         plt.subplot2grid((4, 9), (0, 4), colspan=5, rowspan=4)
 
@@ -1511,9 +1530,9 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
         map.drawmeridians(np.arange(0, 360, 30))
         map.drawparallels(np.arange(-90, 90, 30))
 
-    elif is_local(baz) == 'close':
+    elif is_local(DS) == 'close':
         plt.figure(figsize=(26, 13))
-        plt.title('Event: %s %s\n \n ' %
+        plt.title('Event: %s %sZ\n \n ' %
                 (startev.date, startev.time), fontsize=24, fontweight='bold')
         plt.subplot2grid((4, 9), (0, 4), colspan=5, rowspan=4)
 
@@ -1535,7 +1554,7 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
     map.fillcontinents(color='coral', lake_color='lightblue')
     map.drawmapboundary(fill_color='lightblue')
 
-    if is_local(baz) == 'local' or is_local(baz) == 'close':
+    if is_local(DS) == 'local' or is_local(DS) == 'close':
         map.drawlsmask(land_color='coral', ocean_color='lightblue', lakes=True)
         map.drawcountries(linewidth=0.6)
    
@@ -1547,7 +1566,7 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
         x, y = map(event_lon, event_lat)
         statlon, statlat = map(station_lon, station_lat)
 
-        if is_local(baz) == 'non-local':
+        if is_local(DS) == 'non-local':
             map.scatter(statlon, statlat, 200, color="b", marker="v",
                                                      edgecolor="k", zorder=100)
             plt.text(statlon + 200000, statlat, station, va="top",
@@ -1571,8 +1590,8 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
                 plt.subplot2grid((4, 9), (2, 0), colspan=2)
                 plt.title(u'\nMagnitude: %s \n\nDistance: %.2f [km], %.2f [°]'
                           '\n\nDepth: %.2f [km]'
-                          % (str(event).split('\n')[0][57:64], 0.001 * baz[0],
-                             0.001 * baz[0] / 111.11, depth), fontsize=18,
+                          % (str(event).split('\n')[0][57:64], 0.001 * DS,
+                             0.001 * DS / 111.11, depth), fontsize=18,
                             fontweight='bold')
                 ax = plt.gca()
                 ax.axis('off')
@@ -1590,7 +1609,7 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
                             zorder=100)
 
                 plt.subplot2grid((4, 9), (1, 0), colspan=2)
-                plt.title(u'Event: %s %s\n' % (startev.date, startev.time), 
+                plt.title(u'Event: %s %sZ\n' % (startev.date, startev.time), 
                                                     fontsize=20, weight='bold')
                 ax = plt.gca()
                 ax.axis('equal')
@@ -1599,13 +1618,13 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
                 plt.subplot2grid((4, 9), (2, 0), colspan=2)
                 if reg==True:
                     plt.title(u'\n\nRegion: %s \n\nMagnitude: %s \n\nDistance: %.2f [km], %.2f [°]\n\nDepth: %.2f [km]'
-                              % (region, str(event).split('\n')[0][57:64], 0.001 * baz[0],
-                                 0.001 * baz[0] / 111.11, depth),
+                              % (region, str(event).split('\n')[0][57:64], 0.001 * DS,
+                                 0.001 * DS / 111.11, depth),
                                 fontsize=18, fontweight='bold')
                 else:
                     plt.title(u'\n\nMagnitude: %s \n\nDistance: %.2f [km] - %.2f [°]\n\nDepth: %.2f [km]'
-                              % (str(event).split('\n')[0][57:64], 0.001 * baz[0],
-                                 0.001 * baz[0] / 111.11, depth),
+                              % (str(event).split('\n')[0][57:64], 0.001 * DS,
+                                 0.001 * DS / 111.11, depth),
                                 fontsize=18, fontweight='bold')
                 ax = plt.gca()
                 ax.axis('off')
@@ -1643,8 +1662,8 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
 
                 plt.title(u'\nMagnitude: %s \n\nDistance: %.2f [km], %.2f [°]'
                           '\n\nDepth: %.2f [km]'
-                          % (str(event).split('\n')[0][57:64], 0.001 * baz[0],
-                             0.001 * baz[0] / 111.11, depth), fontsize=18,
+                          % (str(event).split('\n')[0][57:64], 0.001 * DS,
+                             0.001 * DS / 111.11, depth), fontsize=18,
                           fontweight='bold')
                 ax = plt.gca()
                 ax.axis('off')
@@ -1658,7 +1677,7 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
 
             else:
                 plt.subplot2grid((4, 9), (1, 0), colspan=2)
-                plt.title(u'Event: %s %s\n' % (startev.date, startev.time), 
+                plt.title(u'Event: %s %sZ\n' % (startev.date, startev.time), 
                                                     fontsize=20, weight='bold')
                 ax = plt.gca()
                 ax.axis('equal')
@@ -1667,14 +1686,14 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
                 plt.subplot2grid((4, 9), (2, 0), colspan=2)
                 if reg==True:
                     plt.title(u'\n\nRegion: %s \n\nMagnitude: %s \n\nDistance: %.2f [km], %.2f [°]\n\nDepth: %.2f [km]'
-                              % (region, str(event).split('\n')[0][57:64], 0.001 * baz[0],
-                                 0.001 * baz[0] / 111.11, depth),
+                              % (region, str(event).split('\n')[0][57:64], 0.001 * DS,
+                                 0.001 * DS / 111.11, depth),
                                                  fontsize=18, fontweight='bold')
                 else:
                     plt.title(u'\nMagnitude: %s \n\nDistance: %.2f [km], %.2f [°]'
                               '\n\nDepth: %.2f [km]'
-                              % (str(event).split('\n')[0][57:64], 0.001 * baz[0],
-                                 0.001 * baz[0] / 111.11, depth), 
+                              % (str(event).split('\n')[0][57:64], 0.001 * DS,
+                                 0.001 * DS / 111.11, depth), 
                                                 fontsize=18,fontweight='bold')
                 ax = plt.gca()
                 ax.axis('off')
@@ -1692,7 +1711,7 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
         statlon, statlat = map(station_lon, rt[0].stats.
                                coordinates.latitude)
 
-        if is_local(baz) == 'local':
+        if is_local(DS) == 'local':
             map.scatter(x, y, 600, color="b", marker="*", edgecolor="k",
                                                                     zorder=100)
             map.scatter(statlon, statlat, 700, color="b", marker="v",
@@ -1700,7 +1719,7 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
             plt.text(statlon + 27000, statlat, station, fontsize=18, va="top",
                                 family="monospace", weight="bold", zorder=101,
                                  color='k', backgroundcolor='white')
-        elif is_local(baz) == 'non-local':
+        elif is_local(DS) == 'non-local':
             map.scatter(x, y, 200, color="b", marker="*", edgecolor="k",
                                                                      zorder=100)
             map.scatter(statlon, statlat, 300, color="b", marker="v",
@@ -1718,7 +1737,7 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
                              color='k', backgroundcolor='white', fontsize=18)
 
         plt.subplot2grid((4, 9), (1, 0), colspan=2)
-        plt.title(u'Event: %s %s\n' % (startev.date, startev.time), 
+        plt.title(u'Event: %s %sZ\n' % (startev.date, startev.time), 
                                                     fontsize=20, weight='bold')
         ax = plt.gca()
         ax.axis('equal')
@@ -1727,22 +1746,23 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
         plt.subplot2grid((4, 9), (3, 0), colspan=2)
         if reg==True:
             plt.title(u'\n\nRegion: %s \n\nMagnitude: %s \n\nDistance: %.2f [km], %.2f [°]\n\nDepth: %.2f [km]'
-                      % (region, str(event).split('\n')[0][57:64], 0.001 * baz[0],
-                         0.001 * baz[0] / 111.11, depth),
+                      % (region, str(event).split('\n')[0][57:64], 0.001 * DS,
+                         0.001 * DS / 111.11, depth),
                       fontsize=18, fontweight='bold')
         else:
             plt.title(u'\nMagnitude: %s \n\nDistance: %.2f [km], %.2f [°]'
                       '\n\nDepth: %.2f [km]'
-                      % (str(event).split('\n')[0][57:63], 0.001 * baz[0],
-                         0.001 * baz[0] / 111.11, depth), fontsize=18,
+                      % (str(event).split('\n')[0][57:63], 0.001 * DS,
+                         0.001 * DS / 111.11, depth), fontsize=18,
                       fontweight='bold')
         ax = plt.gca()
         ax.axis('off')
 
+    # ============================= Save Figure ============================
     plt.savefig(
         os.path.join(folder_name,tag_name + '_{}_page_1.png'.format(station)))
     plt.close()
-    print("Completed and Saved")
+    print("Done")
 
 
     # ======================================================================== 
@@ -1750,27 +1770,25 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
     #               Preprocessing of rotations and translations
     #
     # =========================================================================
-    rt, ac, rt_pcoda, ac_pcoda, sec, cutoff, cutoff_pc = resample(
-                                                    is_local(baz), baz, rt, ac)
+    rt, ac, rt_pcoda, ac_pcoda, sec, sec_p, cutoff, cutoff_pc = resample(
+                                                    is_local(DS), rt, ac)
 
-    print("Removing instrument response")
+    print("Removing instrument response...")
     rt, ac, rt_pcoda, ac_pcoda = remove_instr_resp(
                                     rt, ac, rt_pcoda, ac_pcoda,station, startev)
 
-    print("Filtering and rotating")
-    rotate, pcod_rotate, pcoda_rotate, frtp, facp, frotate, cop_rt, rt_bands
-    rotate_bands = filter_and_rotate(ac, rt, baz, rt_pcoda, ac_pcoda, cutoff, 
-                                            cutoff_pc, station, is_local(baz))
+    print("Filtering and rotating traces...")
+    # filter raw data, rotate some to theoretical backazimuth
+    rt_bands, rotate_bands, rotate, rt_pcoda_full, pcoda_rotate_full, \
+    filt_rt_pcoda, filt_ac_pcoda, filt_rotate = filter_and_rotate(ac, rt, BAz, 
+                rt_pcoda, ac_pcoda, cutoff, cutoff_pc, station, is_local(DS))
 
-    print("Getting arrival times")
-
-    # When the event starts in the fetched data
+    print("Getting theoretical arrival times...")
+    # find event start and theoretical arrival times for seismics phases
     init_sec = startev - ac[0].stats.starttime
-
-    arriv_p, arriv_s = ps_arrival_times(baz[0], depth, init_sec)
-
-    arrivals = time_windows(baz, arriv_p, arriv_s, init_sec, is_local(baz))
-
+    arriv_p, arriv_s = ps_arrival_times(DS, depth, init_sec)
+    min_pw, max_pw, min_sw, max_sw, min_lwi, max_lwi, min_lwf, max_lwf = \
+                    time_windows(DS, arriv_p, arriv_s, init_sec, is_local(DS))
 
     # ======================================================================== 
     #                                
@@ -1778,30 +1796,32 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
     #           Waveform Comparison plot w/ individual phase subplots
     #
     # =========================================================================    
-    print("\nPage 2, waveform comparison plot")
-    
-    time = rt[0].stats.delta * np.arange(0, len(rt[0].data))  # Time in seconds
+    print("\nPage 2 >  Waveform Comparison...",end=" ")
 
-    rt.taper(max_percentage=0.05)
+    # separate transverse acceleration from rotated traces
+    trv_acc = rotate.select(component='T')
+
+    # rt.taper(max_percentage=0.05) # this was here but we already taper?
+    c1 = .5 * max(abs(trv_acc[0].data)) / max(abs(rt[0].data))  # vel in m/s
     fact1 = 2 * max(rt[0].data)  # Factor to displace the rotation rate
-    c1 = .5 * max(abs(rotate[1])) / max(abs(rt[0].data))  # Vel in m/s
+    time = rt[0].stats.delta * np.arange(0, len(rt[0].data))  # time in seconds
 
     # plotting
     plt.figure(figsize=(18, 9))
     plt.subplot2grid((6, 5), (2, 0), colspan=5, rowspan=2)
     plt.plot(time, rt[0].data, color='r', label=r'Rotation rate')
-    plt.plot(time, (0.5 / c1) * rotate[1] + fact1, 
+    plt.plot(time, (0.5 / c1) * trv_acc[0].data + fact1, 
                                 color='k', label=r'Transversal acceleration')
     plt.xlabel(r'Time [s]', fontweight='bold', fontsize=13)
     plt.ylabel(
         r'$\dot{\mathbf{\Omega}}_\mathbf{z}$ [nrad/s] - a$_\mathbf{T}$/2c'
         '[1/s]', fontweight='bold', fontsize=13)
     plt.xlim(0, rt[0].stats.delta * len(rt[0].data))
-    plt.ylim(min(rt[0].data), fact1 + max((1. / (2. * c1)) * rotate[1]))
-    box_yposition = ((fact1 + max((1. / (2. * c1)) * rotate[1]))
+    plt.ylim(min(rt[0].data), fact1 + max((1. / (2. * c1)) * trv_acc[0].data))
+    box_yposition = ((fact1 + max((1. / (2. * c1)) * trv_acc[0].data))
                      - abs(min(rt[0].data)))/2  # box is in middle of figure
     
-    if is_local(baz) == 'non-local':  # gap between annotation and vline
+    if is_local(DS) == 'non-local':  # gap between annotation and vline
         xgap = 50
     else:
         xgap = 15
@@ -1820,7 +1840,7 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
     plt.axvline(x=min_lwf, linewidth=1)
     plt.annotate('4', xy=(min_lwf+xgap, box_yposition), fontsize=14,
                                             fontweight='bold', bbox=bbox_props)
-    plt.title(r'Ring laser and broadband seismometer recordings. Event: %s %s'
+    plt.title(r'Ring laser and broadband seismometer recordings. Event: %s %sZ'
               % (startev.date, startev.time))
     plt.grid(True)
     plt.legend(loc=7,shadow=True)
@@ -1828,29 +1848,33 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
     # =============================== P coda ===============================
     plt.subplot2grid((6, 5), (0, 0), colspan=2)
     
-    # integers for indexing
-    cop_rt_SR = int(cop_rt[0].stats.sampling_rate) 
+    # integer sampling rate for slice indexing
     rt_SR = int(rt[0].stats.sampling_rate)
-
-    min_pw_cop = int(round(cop_rt_SR * min_pw))
-    max_pw_cop = int(round(cop_rt_SR * max_pw))
-    min_pw_rt = int(round(rt_SR * min_pw))
-    max_pw_rt = int(round(rt_SR * max_pw))
+    rt_pcoda_SR = int(rt_pcoda_full[0].stats.sampling_rate)
     
-    cp = 0.5 * (max(abs(pcod_rotate[1][min_pw_cop:max_pw_cop]))/
-                max(abs(cop_rt[0].data[min_pw_cop:max_pw_cop])))
+    # transverse acceleration pcoda
+    pc_trv_acc = pcoda_rotate_full.select(component='T')
 
-    minamp1_pcod = min((0.5 / cp) * pcod_rotate[1][min_pw_rt:max_pw_rt])
-    minamp2_pcod = min(cop_rt[0].data[min_pw_rt:max_pw_rt])
+    # pwave arrival times in samples for normal trace and pcoda
+    min_pw_rt = rt_SR * min_pw
+    max_pw_rt = rt_SR * max_pw
+    min_pw_pcrt = rt_pcoda_SR * min_pw
+    max_pw_pcrt = rt_pcoda_SR * max_pw
 
-    maxamp1_pcod = max((0.5 / cp) * pcod_rotate[1][min_pw_rt:max_pw_rt])
-    maxamp2_pcod = max(cop_rt[0].data[min_pw_rt:max_pw_rt])
+    # pcoda phase velocity
+    cp = 0.5 * (max(abs(pc_trv_acc[0][min_pw_pcrt:max_pw_pcrt]))/
+                max(abs(rt_pcoda_full[0].data[min_pw_pcrt:max_pw_pcrt])))
 
-    plt.plot(time, cop_rt[0].data, color='r')
-    plt.plot(time, (0.5 / cp) * pcod_rotate[1], color='k')
+    # find min and max trace amplitudes for y-limits
+    min_ta_pcod = min((0.5 / cp) * pc_trv_acc[0][min_pw_rt:max_pw_rt])
+    max_ta_pcod = max((0.5 / cp) * pc_trv_acc[0][min_pw_rt:max_pw_rt])
+    min_rt_pcod = min(rt_pcoda_full[0].data[min_pw_rt:max_pw_rt])
+    max_rt_pcod = max(rt_pcoda_full[0].data[min_pw_rt:max_pw_rt])
+
+    plt.plot(time, rt_pcoda_full[0].data, color='r')
+    plt.plot(time, (0.5 / cp) * pc_trv_acc[0], color='k')
     plt.xlim(min_pw, max_pw)
-    plt.ylim(min([minamp1_pcod, minamp2_pcod]),
-            max([maxamp1_pcod, maxamp2_pcod]))
+    plt.ylim(min([min_ta_pcod, min_ta_pcod]), max([max_rt_pcod, max_rt_pcod]))
     plt.xlabel(r'Time [s]', fontweight='bold', fontsize=11)
     plt.ylabel(
         r'$\dot{\mathbf{\Omega}}_\mathbf{z}$ [nrad/s] - a$_\mathbf{T}$/2c'
@@ -1861,24 +1885,22 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
     # =============================== S wave ===============================
     plt.subplot2grid((6, 5), (0, 3), colspan=2)
 
-    # integers for indexing
-    min_sw_rt = int(round(rt_SR * min_sw))
-    max_sw_rt = int(round(rt_SR * max_sw))
+    # swave arrival times in samples
+    min_sw_rt = rt_SR * min_sw
+    max_sw_rt = rt_SR * max_sw
 
-    cs = 0.5 * (max(abs(rotate[1][min_sw_rt:max_sw_rt])) / 
+    cs = 0.5 * (max(abs(trv_acc[0].data[min_sw_rt:max_sw_rt])) / 
                 max(abs(rt[0].data[min_sw_rt:max_sw_rt])))
 
-    minamp1_s = min((0.5 / cs) * rotate[1][min_sw_rt:max_sw_rt])
-    minamp2_s = min(rt[0].data[min_sw_rt:max_sw_rt])
-    maxamp1_s = max((0.5 / cs) * rotate[1][min_sw_rt:max_sw_rt])
-    maxamp2_s = max(rt[0].data[min_sw_rt:max_sw_rt])
+    max_rt_s = max(rt[0].data[min_sw_rt:max_sw_rt])
+    min_rt_s = min(rt[0].data[min_sw_rt:max_sw_rt])
+    min_ta_s = min((0.5 / cs) * trv_acc[0].data[min_sw_rt:max_sw_rt])
+    max_ta_s = max((0.5 / cs) * trv_acc[0].data[min_sw_rt:max_sw_rt])
 
     plt.plot(time, rt[0].data, color='r')
-    plt.plot(time, (0.5 / cs) * rotate[1], color='k')
+    plt.plot(time, (0.5 / cs) * trv_acc[0].data, color='k')
     plt.xlim(min_sw, max_sw)
-    plt.ylim(
-        min([minamp1_s, minamp2_s]),
-        max([maxamp1_s, maxamp2_s]))
+    plt.ylim(min([min_ta_s, min_rt_s]), max([max_ta_s, max_rt_s]))
     plt.xlabel(r'Time [s]', fontweight='bold', fontsize=11)
     plt.ylabel(
         r'$\dot{\mathbf{\Omega}}_\mathbf{z}$ [nrad/s] - a$_\mathbf{T}$/2c'
@@ -1886,26 +1908,25 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
     plt.title(u'2: S-wave (Lowpass, cut-off: %s Hz)' % (cutoff))
     plt.grid(True)
 
-    # ============================= Surface waves =============================
+    # ======================== Initial surface waves ==========================
     plt.subplot2grid((6, 5), (5, 0), colspan=2)
 
-    # integers for indexing
-    min_lwi_rt = int(round(rt_SR * min_lwi))
-    max_lwi_rt = int(round(rt_SR * max_lwi))
+    # initial surface wave arrival times in samples
+    min_lwi_rt = rt_SR * min_lwi
+    max_lwi_rt = rt_SR * max_lwi
 
-    cl1 = 0.5 * (max(abs(rotate[1][min_lwi_rt:max_lwi_rt])) /
+    cl1 = 0.5 * (max(abs(trv_acc[0].data[min_lwi_rt:max_lwi_rt])) /
                  max(abs(rt[0].data[min_lwi_rt:max_lwi_rt])))
-    minamp1_surf = min((0.5 / cl1) * rotate[1][min_lwi_rt:max_lwi_rt])
-    minamp2_surf = min(rt[0].data[min_lwi_rt:max_lwi_rt])
-    maxamp1_surf = max((0.5 / cl1) * rotate[1][min_lwi_rt:max_lwi_rt])
-    maxamp2_surf = max(rt[0].data[min_lwi_rt:max_lwi_rt])
+
+    min_rt_lwi = min(rt[0].data[min_lwi_rt:max_lwi_rt])
+    max_rt_lwi= max(rt[0].data[min_lwi_rt:max_lwi_rt])
+    min_ta_lwi = min((0.5 / cl1) * trv_acc[0].data[min_lwi_rt:max_lwi_rt])
+    max_ta_lwi = max((0.5 / cl1) * trv_acc[0].data[min_lwi_rt:max_lwi_rt])
 
     plt.plot(time, rt[0].data, color='r')
-    plt.plot(time, (0.5 / cl1) * rotate[1], color='k')
+    plt.plot(time, (0.5 / cl1) * trv_acc[0].data, color='k')
     plt.xlim(min_lwi, max_lwi)
-    plt.ylim(
-        min([minamp1_surf, minamp2_surf]),
-        max([maxamp1_surf, maxamp2_surf]))
+    plt.ylim(min([min_rt_lwi, min_ta_lwi]),max([max_rt_lwi, max_ta_lwi]))
     plt.xlabel(r'Time [s]', fontweight='bold', fontsize=11)
     plt.ylabel(
         r'$\dot{\mathbf{\Omega}}_\mathbf{z}$ [rad/s] - a$_\mathbf{T}$/2c'
@@ -1917,23 +1938,22 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
     # ========================== Later surface waves ==========================
     plt.subplot2grid((6, 5), (5, 3), colspan=2)
 
-    # create integers for indexing
-    min_lwf_rt = int(round(rt_SR * min_lwf))
-    max_lwf_rt = int(round(rt_SR * max_lwf))
+    # later surface wave arrival times in samples
+    min_lwf_rt = rt_SR * min_lwf
+    max_lwf_rt = rt_SR * max_lwf
 
-    cl2 = 0.5 * (max(abs(rotate[1][min_lwf_rt:max_lwf_rt])) /
+    cl2 = 0.5 * (max(abs(trv_acc[0].data[min_lwf_rt:max_lwf_rt])) /
                  max(abs(rt[0].data[min_lwf_rt:max_lwf_rt])))
-    minamp1_lat = min((0.5 / cl2) * rotate[1][min_lwf_rt:max_lwf_rt])
-    minamp2_lat = min(rt[0].data[min_lwf_rt:max_lwf_rt])
-    maxamp1_lat = max((0.5 / cl2) * rotate[1][min_lwf_rt:max_lwf_rt])
-    maxamp2_lat = max(rt[0].data[min_lwf_rt:max_lwf_rt])
+    
+    min_rt_lwf = min(rt[0].data[min_lwf_rt:max_lwf_rt])
+    max_rt_lwf = max(rt[0].data[min_lwf_rt:max_lwf_rt])
+    min_ta_lwf = min((0.5 / cl2) * trv_acc[0].data[min_lwf_rt:max_lwf_rt])
+    max_ta_lwf = max((0.5 / cl2) * trv_acc[0].data[min_lwf_rt:max_lwf_rt])
 
     plt.plot(time, rt[0].data, color='r')
-    plt.plot(time, (0.5 / cl2) * rotate[1], color='k')
+    plt.plot(time, (0.5 / cl2) * trv_acc[0].data, color='k')
     plt.xlim(min_lwf, max_lwf)
-    plt.ylim(
-        min([minamp1_lat, minamp2_lat]),
-        max([maxamp1_lat, maxamp2_lat]))
+    plt.ylim(min([min_rt_lwf, min_ta_lwf]),max([max_rt_lwf, max_ta_lwf]))
     plt.xlabel(r'Time [s]', fontsize=11, fontweight='bold')
     plt.ylabel(
         r'$\dot{\mathbf{\Omega}}_\mathbf{z}$ [rad/s] - a$_\mathbf{T}$/2c'
@@ -1941,77 +1961,74 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
     plt.title(r'4: Later surface waves (Lowpass, cut-off: %s Hz)' % (cutoff))
     plt.grid(True)
 
+    # ============================= Save Figure =============================
     plt.savefig(
         os.path.join(folder_name,tag_name + '_{}_page_2.png'.format(station)))
     plt.close()
-    print("Completed and Saved")
+    print("Done")
 
     # ======================================================================== 
     #                                
     #                               Cross Correlations
     #
     # ========================================================================= 
-    print("Zero-lag correlation coefficients")
-    # compare vertical rotation rate and transverse acceleration
-    corrcoefs, thres = get_corrcoefs(rt, rotate.select(component='T'), 
-                                                            sec, station)
+    print("Finding zero-lag correlation coefficients...")
 
-    # calculate correlations for different frequency bands
-    corrcoefs_band, threshholds = [], []
+    # correlate vertical rotation rate and transverse acceleration
+    corrcoefs, thres = get_corrcoefs(rt, trv_acc, sec, station)
+
+    # calculate correlations for different frequency bands given by seconds_list
+    corrcoefs_bands, thresholds = [], []
     seconds_list = [200, 100, 50, 20, 12, 10, 8, 6]
+
     for i in range(len(rt_bands)):
-        corrcoefs_tmp, thresh_tmp = get_corrcoefs(rt_bands[i],rotate_bands[i],
-                                            seconds_list[i], station)
+        tr_acc_band = rotate_bands[i].select(component='T')
+        corrcoefs_tmp, thresh_tmp = get_corrcoefs(streamA = rt_bands[i],
+                                                  streamB = tr_acc_band,
+                                                  sec = seconds_list[i], 
+                                                  station = station)
         corrcoefs_bands.append(corrcoefs_tmp)
         thresholds.append(thresh_tmp)
 
     # zero-lag correlation coefficients for range of backazimuths
-    print("Backazimuth analysis")
-    corrbaz, maxcorr, backas, max_coefs_10deg = \
-        backas_analysis(rt, rotate, sec, corrcoefs, None, station)
+    print("Analyzing correlation by BAz bins...")
+    corrbaz, maxcorr, backas, max_coefs_10deg = baz_analysis(
+                                                    rt, trv_acc, sec, station)
 
     X, Y = np.meshgrid(np.arange(0, sec * len(corrcoefs), sec), backas)
 
-    # Estimating backazimuth
-    print("Estimating backazimuth")
-    corrsum, backas2, max_ebaz_xcoef, best_ebaz = backas_swave_est(
-                                            rt, ac, min_sw, max_lwf, station)
+    # estimate backazimuth and correlations for given BAz
+    print("Estimating best backazimuth value...")
+    corrsum, baz_list, max_ebaz_xcoef, EBA = estimate_baz(
+                                        rt, trv_acc, min_sw, max_lwf, station)
 
-    # calculate phase veloc. for windows where corrcoef is good enough (.75)
-    print("Calculating phase velocities")
+    # calculate phase velocity for windows where correlation > 0.75
+    print("Calculating phase velocities...")
 
-    # calculate startindex for phase velocity calculation in frequency bands:
-    # starts at the beginning of surface wave arrivals as body waves are
-    # not appropriate
-    ind_surf = int(min_lwi/sec)
-    ind_band = False  # indicator that we are not dealing with bands 1-8
-
-    phasv, EBA = phase_vel(rt, sec, corrcoefs, rotate, corrsum, backas2,
-                           ind_band, ind_surf)
-
-    # calculates phase velocities for different frequency bands -
-    # -> put EBA_bandx here instead of EBA and backas2_bandx,...
-    # for frequency dependent EBA
-    ind_band = True  # indicator that we are dealing with bands 1-8
-    phasv_bands, EBA_list = [], []
-    for i in range(len(corrcoef_bands)):
-        phasv_tmp, EBA_tmp = phase_vel(rt_band[i], seconds_list[i], corrcoefs_bands[i],
-                                rotate_bands[i], corrsum,backas2, ind_band, 
-                                ind_surf)
-        # filter out NaNs
-        phasv_bands.append(phasv_tmp[~np.isnan(phasv_tmp)])
-        EBA_list.append(EBA_tmp)
+    # calculate phase velocities starting at surface wave arrivals 
+    surf_start = min_lwi // sec
+    phasv = get_phase_vel(
+                    rt, trv_acc, sec, corrcoefs, surf_start, band_check=False)
     
-    # phase velocity mean values and std. (individual freqs.) for json file
-    ind_band = False
-    phasv_means,phasv_stds = [],[]
-    for ksk in phasv_bands:
-        if len(ksk) != 0:
-            phasv_means.append(np.mean(ksk))
-            phasv_stds.append(np.std(ksk))
+    # calculate phase velocities for different frequency bands, 1-8
+    phasv_bands,phasv_means,phasv_stds = [],[],[]
+    for i in range(len(rt_bands)):
+        trv_tmp = rotate_bands[i].select(component='T')
+        phasv_tmp = get_phase_vel(rt_bands[i], trv_tmp, seconds_list[i],
+                                corrcoefs_bands[i], surf_start, band_check=True)
+        
+        # filter out NaNs and append to list
+        phasv_bands.append(phasv_tmp[~np.isnan(phasv_tmp)])
+    
+    # phase velocity mean values and std. for json file
+    for PVB in phasv_bands:
+        if len(PVB) != 0:
+            phasv_means.append(np.mean(PVB))
+            phasv_stds.append(np.std(PVB))
         else:
             phasv_means.append(np.NaN)
             phasv_stds.append(np.NaN)
+
 
     # ======================================================================== 
     #                                
@@ -2020,20 +2037,20 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
     #                       Estimation of backazimuth figures
     #
     # ========================================================================= 
-    print("\nPage 3, cross-correlation and phase velocity figures")
+    print("\nPage 3 > Cross-correlation, Phase velocity...",end=" ")
 
     plt.figure(figsize=(18, 9))
     plt.subplot2grid((4, 26), (0, 0), colspan=25)
     plt.plot(time, rt[0].data, color='r', label=r'Rotation rate')
-    plt.plot(time, (1. / (2. * c1)) * rotate[1] + fact1, 
+    plt.plot(time, (1. / (2. * c1)) * trv_acc[0].data + fact1, 
                                 color='k', label=r'Transversal acceleration')
     plt.ylabel(
         r'$\dot{\mathbf{\Omega}}_\mathbf{z}$ [nrad/s] - a$_\mathbf{T}$/2c '
         '[1/s]', fontsize=10, fontweight='bold')
     plt.xlim(0, rt[0].stats.delta * len(rt[0].data))
-    plt.ylim(min(rt[0].data), fact1 + max((1. / (2. * c1)) * rotate[1]))
+    plt.ylim(min(rt[0].data), fact1 + max((1. / (2. * c1)) * trv_acc[0].data))
     plt.title(r'Cross-correlation for $\dot\Omega_z$ and a$_T$ in %s seconds '
-                          'time windows (lowpass, cutoff: %s Hz). Event: %s %s'
+                          'time windows (lowpass, cutoff: %s Hz). Event: %s %sZ'
                           % (sec, cutoff, startev.date, startev.time))
     plt.grid(True)
     plt.legend(loc=7,shadow=True)
@@ -2070,14 +2087,14 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
     plt.grid(True)
 
     plt.subplot2grid((4, 26), (3, 0), colspan=25)
-    teobaz = baz[2] * np.ones(len(corrcoefs) + 1)
+    teobaz = BAz * np.ones(len(corrcoefs) + 1)
     plt.pcolor(X, Y, corrbaz, cmap=plt.cm.RdYlGn_r, vmin=-1, vmax=1)
     plt.plot(np.arange(0, sec * len(corrcoefs) + 1, sec), teobaz, '--r', lw=2)
     plt.plot(np.arange(0, sec * len(corrcoefs), sec), maxcorr, '.k')
-    plt.text(1000, baz[2], str(baz[2])[0:5] + r'°',
+    plt.text(1000, BAz, str(BAz)[0:5] + r'°',
              bbox={'facecolor': 'black', 'alpha': 0.8}, color='r')
 
-    if EBA == backas2[np.asarray(corrsum).argmax()]:
+    if EBA == baz_list[np.asarray(corrsum).argmax()]:
         obsbaz = EBA * np.ones(len(corrcoefs) + 1)
         plt.text(400, EBA, str(EBA)[0:5] + r'°',
                  bbox={'facecolor': 'black', 'alpha': 0.8}, color='y')
@@ -2100,83 +2117,100 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
     plt.savefig(
         os.path.join(folder_name,tag_name + '_{}_page_3.png'.format(station)))
     plt.close()
-    print("Completed and Saved")
+    print("Done")
 
     # ======================================================================== 
     #                                
     #                                P-Coda analysis
     #
     # ========================================================================= 
+    
     print("Analyzing rotations in the P-coda")
-    print("Zero-lag correlation coefficients")
+    
+    # Zero-lag correlation coefficients
+    print("ZLCC...",end=" ")
 
-    if is_local(baz)=='non-local':
-        sec_p = 5
-    else:
-        sec_p = 2
-
+    # integer sampling rates
+    import pdb;pdb.set_trace()
+    rt_pc_SR = int(filt_rt_pcoda[0].stats.sampling_rate)
+    trv_pc_SR = int(filt_rotate[0].stats.sampling_rate)
+    
     corrcoefs_p = []
     lwi_average = int(round((min_lwi+max_lwi)/2))
-    rt_pcodaxc = frtp[0].data[0:lwi_average * int(
-                                        rt_pcoda[0].stats.sampling_rate)]
-    pcoda_rotatexc = frotate[1][0:lwi_average * int(
-                                        facp[0].stats.sampling_rate)]
 
-    corrcoefs_p, thres_p = Get_corrcoefs(rt_pcoda[0], rt_pcodaxc, facp,
-                                            pcoda_rotatexc, sec_p, station)
+    # separate transverse and vertical components
+    trv_acc_pcoda = filt_rotate.select(component='T')
+    vrt_acc_pcoda = filt_rotate.select(component='Z')
 
-    print("Backazimuth analysis")
+    # cut pcoda at correct time window and taper cuts
+    rt_pcoda_cut = filt_rt_pcoda[0].data[0:lwi_average * rt_pc_SR]
+    trv_pcoda_cut = trv_acc_pcoda[0].data[0:lwi_average * trv_pc_SR]
+    for traces in [rt_pcoda_cut,trv_pcoda_cut,ver_pcoda_cut]:
+        traces.taper(max_percentage=0.05)
 
-    # integers for indexing
-    ac_pc_SR = int(ac_pcoda[0].stats.sampling_rate)
-    max_lwi_ac = int(round(ac_pc_SR * max_lwi))
-    ind = int(round(max_lwi * facp[0].stats.sampling_rate))
+    # find correlations
+    corrcoefs_p, thres_p = get_corrcoefs(rt_pcoda_cut, trv_pcoda_cut, sec_p,
+                                                                        station)
 
-# include rotate
-    corrbazp, maxcorrp, backas, max_coefs_10deg_p = backas_analysis(frtp[0], 
-                            rt_pcodaxc, facp, sec_p, corrcoefs_p, ind, station)
+    print("BAz...",end=" ")
+
+    # surface wave start sample
+    max_lwi_ac = trv_pc_SR * max_lwi
+
+    # analyze backazimuth
+    corrbaz_p, maxcorr_p, backas, max_coefs_10deg_p = baz_analysis(
+                                    rt_pcoda_cut, trv_pcoda_cut, sec_p, station)
 
     Xp, Yp = np.meshgrid(np.arange(0, sec_p * len(corrcoefs_p), sec_p), backas)
 
-    # TAPER
-    rt_pcoda.taper(max_percentage=0.05)
-    time_p = rt_pcoda[0].stats.delta * np.arange(0, len(rt_pcoda[0].data))
-    fact1_p = 2 * max(rt_pcoda[0].data[0:max_lwi_ac])
-    c1_p = .5 * (max(abs(pcoda_rotate[1][0: max_lwi_ac])) /
-                max(abs(rt_pcoda[0].data[0: max_lwi_ac])))
+    # set up arrays for plotting
+    time_p = rt_pcoda_cut[0].stats.delta * np.arange(0, len(rt_pcoda[0].data))
+    fact1_p = 2 * max(rt_pcoda_cut[0].data[0:max_lwi_ac])
 
-    maxcorrp_over50 = []
-    for i10 in range(0, len(maxcorrp)):
-        if np.max(corrbazp[:, i10]) >= 0.5:
-            maxcorrp_over50.append(maxcorrp[i10])
+    # calculate phase velocity for scaling, from full waveform sections 
+    # filtered with the pcoda highpass cutoff
+    c1_p = .5 * (max(abs(pc_trv_acc[0].data[0:max_lwi_ac])) /
+                 max(abs(rt_pcoda[0].data[0:max_lwi_ac])))
+
+    maxcorr_p_list = []
+    for m in range(0, len(maxcorr_p)):
+        if np.max(corrbaz_p[:,m]) >= 0.5:
+            maxcorr_p_list.append(maxcorr_p[m])
         else:
-            maxcorrp_over50.append(0)
+            maxcorr_p_list.append(0)
 
-    print("\nPage 4, cross-correlation for P-coda")
+    # ======================================================================== 
+    #                                
+    #                                   Page 4
+    #               Cross correlations for P-Coda time window
+    #
+    # ========================================================================= 
+
+    print("\nPage 4 > P-Coda Cross-correlations",end=" ")
     plt.figure(figsize=(18, 9))
     plt.subplot2grid((5, 26), (0, 0), colspan=25)
-    plt.plot(time_p, ac_pcoda.select(component='Z')[0].data, color='g')
+    plt.plot(time_p, vrt_acc_pcoda[0].data, color='g')
     plt.ylabel(r'a$_\mathbf{Z}$ [nm/s$^2$]', fontweight='bold', fontsize=11)
     plt.ticklabel_format(axis='y', style='sci', scilimits=(-2,2))
     plt.xlim(0, (min_lwi + max_lwi) // 2)
-    plt.ylim(min(ac_pcoda.select(component='Z')[0].data[0:max_lwi_ac]),
-             max(ac_pcoda.select(component='Z')[0].data[0:max_lwi_ac]))
+    plt.ylim(min(vrt_acc_pcoda[0].data[0:max_lwi_ac]),
+             max(vrt_acc_pcoda[0].data[0:max_lwi_ac]))
     plt.title(r'$\dot{\mathbf{\Omega}}_\mathbf{z}$ and a$_\mathbf{T}$'
               'correlation in the P-coda in a %d seconds time window'
-              ' (highpass, cutoff: 1 Hz). Event: %s %s' % 
+              ' (highpass, cutoff: 1 Hz). Event: %s %sZ' % 
                                             (sec_p, startev.date, startev.time))
     plt.axvline(x=min_pw, linewidth=1)
     plt.axvline(x=min_sw, linewidth=1)
     plt.subplot2grid((5, 26), (1, 0), colspan=25, rowspan=2)
+
     plt.plot(time_p, rt_pcoda[0].data, color='r', label=r'Rotation rate')
-    plt.plot(time_p, (0.5 / c1_p) * pcoda_rotate[1] + fact1_p, color='k',
+    plt.plot(time_p, (0.5 / c1_p) * pc_trv_acc[0].data + fact1_p, color='k',
                                              label=r'Transversal acceleration')
     plt.ylabel(r'$\dot{\mathbf{\Omega}}_\mathbf{z}$ [nrad/s] -'
                    'a$_\mathbf{T}$/2c [1/s]', fontweight='bold', fontsize=11)
     plt.xlim(0, (min_lwi + max_lwi) // 2)
     plt.ylim(min(rt_pcoda[0].data[0:max_lwi_ac]), 
-                                        fact1_p + max((1. / (2. * c1_p)) * 
-                                        pcoda_rotate[1][0: max_lwi_ac]))
+            fact1_p + max((1. / (2. * c1_p)) * pcoda_rotate[1][0: max_lwi_ac]))
     xlim2 = (min_lwi + max_lwi) // 2
     box_yposition2 = (fact1_p + max((1. / (2. * c1_p)) * 
                         pcoda_rotate[1][0:max_lwi_ac]) -
@@ -2200,9 +2234,9 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
     plt.ylim(0, 1)
     plt.grid(True)
     plt.subplot2grid((5, 26), (4, 0), colspan=25)
-    plt.pcolor(Xp, Yp, corrbazp, cmap=plt.cm.RdYlGn_r, vmin=-1, vmax=1)
+    plt.pcolor(Xp, Yp, corrbaz_p, cmap=plt.cm.RdYlGn_r, vmin=-1, vmax=1)
     plt.plot(np.arange(0, sec_p * len(corrcoefs_p), sec_p), 
-                                                        maxcorrp_over50, '.k')
+                                                        maxcorr_p_list, '.k')
     plt.xlim(0, (min_lwi + max_lwi) // 2)
     plt.xlabel(r'Time [s]', fontweight='bold')
     plt.ylabel(r'BAz [°]', fontweight='bold')
@@ -2220,16 +2254,16 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
     plt.savefig(
         os.path.join(folder_name,tag_name + '_{}_page_4.png'.format(station)))
     plt.close()
-    print("Completed and Saved")
+    print("Done")
 
     # ======================================================================== 
     #                                
     #                        Store in Json and XML files
     #
     # ========================================================================= 
-    print("Storing event information in JSON and XML")
+    print("Storing event information in JSON and XML files...",end="")
     
-    store_info_json(rotate, ac, rt, corrcoefs, baz, arriv_p, EBA, station, 
+    store_info_json(rotate, ac, rt, corrcoefs, BAz, arriv_p, EBA, station, 
                     phasv_means, phasv_stds, startev, event, data_sources, 
                     depth, max_ebaz_xcoef, folder_name, tag_name)
 
@@ -2349,7 +2383,8 @@ if __name__ == '__main__':
     # The fetched xml provides a moment tensor data for the beachballs.
     # i.e. 'http://www.iris.edu/spudservice/momenttensor/736631/quakeml'
 
-    # Default GCMT mode, or link mode if MT link is given
+    # [default]: get event catalog from GCMT NEW QUICK,
+    # or link mode if moment tensor link is given
     if mode == 'GCMT' or (mode =='link' and link != 'blank'):
         catalog = 'GCMT'
         event_source = 'GCMT'
@@ -2374,6 +2409,7 @@ if __name__ == '__main__':
                             'latitude >= '+str(args.min_latitude), 
                             'latitude <= '+str(args.max_latitude))
 
+    # get event catalog from IRIS through FDSN webservice
     elif mode == 'IRIS':
         print("\nDownloading events from IRIS")
         catalog = 'GCMT'
