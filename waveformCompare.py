@@ -73,21 +73,19 @@ from xml.dom.minidom import parseString
 import numpy as np
 import matplotlib as mpl
 mpl.use('Agg')
-import matplotlib.pylab as plt
-from mpl_toolkits.basemap import Basemap
-from obspy.taup import TauPyModel
 from obspy.core import read
+import matplotlib.pylab as plt
+from obspy.taup import TauPyModel
 from obspy.core.stream import Stream
-# from obspy.imaging.beachball import Beach
-from obspy.core.utcdatetime import UTCDateTime
 from obspy import read_events, Catalog
-from obspy.clients.arclink.client import Client as arclinkClient
-from obspy.clients.fdsn import Client as fdsnClient
+from mpl_toolkits.basemap import Basemap
+# from obspy.imaging.beachball import Beach
 from obspy.signal.rotate import rotate_ne_rt
-from obspy.signal.cross_correlation import xcorr
+from obspy.core.utcdatetime import UTCDateTime
 from obspy.core.util.attribdict import AttribDict
+from obspy.clients.fdsn import Client as fdsnClient
+from obspy.signal.cross_correlation import correlate
 from obspy.geodetics.base import gps2dist_azimuth, locations2degrees
-
 
 # warnings.filterwarnings(
 #     action='once', category=np.VisibleDeprecationWarning,
@@ -142,11 +140,11 @@ def download_data(origin_time, instrument_id, source):
     if not os.path.exists(dataDir_get):
         dataDir_get = None
     
-    import pdb;pdb.set_trace()
+    net, sta, loc, cha = instrument_id.split('.')
+    
     # if data path exists, read in data from file
     if dataDir_get:
         print("Fetching {} data from file".format(net))
-        net, sta, loc, cha = instrument_id.split('.')
         fileName = '.'.join(instrument_id,'D',origin_time.strftime('%Y.%j'))
         filePath = os.path.join(dataDir_get, origin_time.strftime('%Y'),
                                 net, sta, cha + '.D', fileName)
@@ -180,7 +178,7 @@ def download_data(origin_time, instrument_id, source):
                 print("Fetching {} data from FDSN ({})".format(net,S))
                 c = fdsnClient(S)
                 st = c.get_waveforms(network=net, station=sta, location=loc, 
-                                    channel=chan, starttime=origin_time-190,
+                                    channel=cha, starttime=origin_time-190,
                                     endtime=origin_time+3*3600+10)
                 break
             except:
@@ -255,7 +253,7 @@ def event_info_data(event, station, mode, polarity, instrument):
         # create dictionary for sources
         data_sources = {'BJZ':srcRT}
 
-        # broadband station signal, assume all translation has source
+        # broadband station signal, assume all translation same source
         ac = Stream()
         for channels in ['BHN','BHE','BHZ']:
             if instrument == 'STS2':
@@ -275,7 +273,8 @@ def event_info_data(event, station, mode, polarity, instrument):
             ca.stats['sampling_rate'] = 20.
 
     elif station == 'ROMY':
-        source = ['http://erde.geophysik.uni-muenchen.de']
+        source = ['http://eida.bgr.de', 
+                  'http://erde.geophysik.uni-muenchen.de']
 
         # ringlaser signal, source LMU first
         rotation_id = 'BW.ROMY..BJZ'
@@ -305,8 +304,8 @@ def event_info_data(event, station, mode, polarity, instrument):
     event_lat = origin.latitude
     event_lon = origin.longitude
     depth = origin.depth * 0.001  # Depth in km
-    baz = gps2dist_azimuth(lat1 = event_latitude, 
-                            lon1 =  event_longitude, 
+    baz = gps2dist_azimuth(lat1 = event_lat, 
+                            lon1 =  event_lon, 
                             lat2 = rt[0].stats.coordinates.latitude,
                             lon2 = rt[0].stats.coordinates.longitude)
     
@@ -343,8 +342,9 @@ def is_local(baz):
     non-local.
 
     :type baz: tuple
-    :param baz: Great circle distance in m, azimuth A->B in degrees,
-        azimuth B->A in degrees.
+      :param baz: [0] Great circle distance in m, 
+                  [1] azimuth A->B in degrees,
+                  [2] backazimuth B->A in degrees.
     :rtype: str
     :return: Self-explaining string for event distance.
     """
@@ -359,7 +359,7 @@ def is_local(baz):
     return is_local
 
 
-def Get_MomentTensor_Magnitude(link):
+def get_moment_tensor_magnitude(link):
 
     """
     Extracts the moment tensor and magnitude for an event if an IRIS-xml file
@@ -404,8 +404,9 @@ def resample(is_local, baz, rt, ac):
     :type is_local: str
     :param is_local: Self-explaining string for event distance.
     :type baz: tuple
-    :param baz: Great circle distance in m, azimuth A->B in degrees,
-        azimuth B->A in degrees.
+    :param baz: [0] Great circle distance in m, 
+                [1] azimuth A->B in degrees,
+                [2] backazimuth B->A in degrees.
     :type rt: :class: `~obspy.core.stream.Stream`
     :param rt: Rotational signal from ringlaser.
     :type ac: :class: `~obspy.core.stream.Stream`
@@ -429,24 +430,24 @@ def resample(is_local, baz, rt, ac):
     """
 
     cutoff_pc = 0.5  # Cut-off frequency for the highpass filter in the P-coda
-    if is_local == 'local':
+    if is_local == 'non-local':
+        rt_pcoda = rt.copy()
+        ac_pcoda = ac.copy()
+        rt_pcoda.decimate(factor=2)
+        ac_pcoda.decimate(factor=2)
+        rt.decimate(factor=4)
+        ac.decimate(factor=4)
+        sec = 120 # Length of time window in seconds
+        cutoff = 1.0 # Cut-off freq for the lowpass filter
+    elif is_local == 'local':
         for trr in (rt + ac):
             trr.data = trr.data[0: int(1800 * rt[0].stats.sampling_rate)]
         rt_pcoda = rt.copy()
         ac_pcoda = ac.copy()
         rt.decimate(factor=2)
         ac.decimate(factor=2)
-        sec = 5 # Length of time window in seconds
-        cutoff = 2.0  # Cut-off freq for the lowpass filter
-    elif is_local == 'non-local':
-        rt_pcoda = rt.copy()
-        rt_pcoda.decimate(factor=2)
-        ac_pcoda = ac.copy()
-        ac_pcoda.decimate(factor=2)
-        rt.decimate(factor=4)
-        ac.decimate(factor=4)
-        sec = 120
-        cutoff = 1.0  
+        sec = 5 
+        cutoff = 2.0  
     elif is_local == 'close':
         for trr in (rt + ac):
             trr.data = trr.data[0: int(1800 * rt[0].stats.sampling_rate)]
@@ -464,7 +465,10 @@ def remove_instr_resp(rt, ac, rt_pcoda, ac_pcoda, station, startev):
 
     """
     This function removes the instrument response from the original signal
-    and checks if starttime and endtime match for both instruments.
+    and checks if starttime and endtime match for both instruments. 
+    * Note for Poles and Zeros:
+        1 zero acceleration/ 2 zeros velocity/ 3 zeros displacement for STS2 
+
 
     :type rt: :class: `~obspy.core.stream.Stream`
     :param rt: Rotational signal from ringlaser.
@@ -492,10 +496,7 @@ def remove_instr_resp(rt, ac, rt_pcoda, ac_pcoda, station, startev):
         broadband station signal for p-coda calculation.
     """
 
-  
-    # pole and zeros
-    # note: 1 zero acceleration/2 zeros velocity/3 zeros displacement STS2, 
-    # units in nm/2^2 for acceleration
+    # poles and zeros dictionaries for units of nanometers/s^2
     paz_sts2 = {'poles': [(-0.0367429 + 0.036754j),
                           (-0.0367429 - 0.036754j)],
                 'sensitivity': 0.944019640, 
@@ -510,15 +511,15 @@ def remove_instr_resp(rt, ac, rt_pcoda, ac_pcoda, station, startev):
 
     # standard preprocessing 
     rt.detrend(type='linear')
-    rt_pcoda.detrend(type='linear')
     ac.detrend(type='linear')
-    ac_pcoda.detrend(type='linear')
     ac.taper(max_percentage=0.05)
     rt.taper(max_percentage=0.05)
+    ac_pcoda.detrend(type='linear')
+    rt_pcoda.detrend(type='linear')
 
     # remove instrument response
     if station == 'RLAS':
-        rt[0].data = rt[0].data * 1/(6.3191e3)  # Rotation rate in nrad/s
+        rt[0].data = rt[0].data * 1/(6.3191e3)  # rotation rate: nrad/s
         rt_pcoda[0].data = rt_pcoda[0].data * 1/(6.3191e3)
 
         if instrument == 'STS2':
@@ -534,7 +535,7 @@ def remove_instr_resp(rt, ac, rt_pcoda, ac_pcoda, station, startev):
      
            
     elif station == 'ROMY':
-        rt[0].data = rt[0].data * 1/(1.01821e4) # Rotation rate in nrad/s
+        rt[0].data = rt[0].data * 1/(1.01821e4) # rotation rate in nrad/s
         rt_pcoda[0].data = rt_pcoda[0].data * 1/(1.01821e4)  # nrad/s
  
         ac.simulate(paz_remove=paz_sts2, remove_sensitivity=True)  # nm/s^2
@@ -542,7 +543,7 @@ def remove_instr_resp(rt, ac, rt_pcoda, ac_pcoda, station, startev):
 
 
     elif station == 'PFO':
-        rt[0].data = rt[0].data * 1. / 2.5284 * 1e-3  # Rotation rate in nrad/s
+        rt[0].data = rt[0].data * 1. / 2.5284 * 1e-3  # rotation rate in nrad/s
         rt_pcoda[0].data = rt_pcoda[0].data * 1. / 2.5284 * 1e-3  # nrad/s
         ac.remove_response(output='ACC', pre_filt=(0.005, 0.006, 30., 35.))
         ac_pcoda.remove_response(output='VEL',
@@ -555,7 +556,6 @@ def remove_instr_resp(rt, ac, rt_pcoda, ac_pcoda, station, startev):
     else:
         sys.exit('Invalid station')
 
-
     # make sure start and endtimes match for both instruments, if not, trim
     startaim = max([tr.stats.starttime for tr in (ac + rt)])
     endtaim = min([tr.stats.endtime for tr in (ac + rt)])
@@ -566,7 +566,7 @@ def remove_instr_resp(rt, ac, rt_pcoda, ac_pcoda, station, startev):
 
     return rt, ac, rt_pcoda, ac_pcoda
 
-def gaussianfilter(sigarray, delta, bandwidth, freq0):
+def gaussian_filter(sigarray, delta, bandwidth, freq0):
     
     """
     Gaussian filter function. 
@@ -610,6 +610,8 @@ def gaussianfilter(sigarray, delta, bandwidth, freq0):
 
 def filter_and_rotate(ac, rt, baz, rt_pcoda, ac_pcoda, cutoff, cutoff_pc,
                       station, is_local):
+
+
     """
     Filters trace data using the cut-off frequencies and
     lowpass/ highpass and zerophase filters. Rotates the horizontal components
@@ -656,11 +658,11 @@ def filter_and_rotate(ac, rt, baz, rt_pcoda, ac_pcoda, cutoff, cutoff_pc,
 
     # set the list of frequencies for to bandpass filter for
     freq_list = [0.01, 0.02, 0.04, 0.1, 0.2, 0.3, 0.4, 0.6, 1.0]
+    number_of_bands = len(freq_list) - 1
     
     # copies for phase velocities and pcoda analysis
-    ac_bands = [ac.copy() for _ in range(len(freq_list)-1)]
-    rt_bands = [rt.copy() for _ in range(len(freq_list)-1)]
-    rotate_bands = []
+    rt_bands = [rt.copy() for _ in range(number_of_bands)]
+    rotate_bands = [ac.copy() for _ in range(number_of_bands)]
     cop_ac = ac.copy()
     cop_rt = rt.copy()
 
@@ -683,22 +685,22 @@ def filter_and_rotate(ac, rt, baz, rt_pcoda, ac_pcoda, cutoff, cutoff_pc,
     rotate = ac.copy()
     pcod_rotate = cop_ac.copy()
     pcoda_rotate = ac_pcoda.rotate()
+
     rotate.rotate(method = 'NE->RT', backazmiuth = baz[2])
     pcod_rotate.rotate(method = 'NE->RT', backazmiuth = baz[2])
     pcoda_rotate.rotate(method = 'NE->RT', backazmiuth = baz[2])
     
-    # for varying frequency bands, filter both RT and AC, rotate AC to BAz
+    # for varying frequency bands, rotate to BAz, filter both RT and Rotate, 
     for I in range(number_of_bands):
-        for band_select in [rt_bands[I],ac_bands[I]]:
-            band_select[I].filter(type = 'bandpass',
-                            freqmin = freq_list[I],
-                            freqmax = freq_list[I+1],
-                            corners = 3,
-                            zerophase = True)
-    
-        rotate_bands.append(ac_bands[I].rotate(method='NE->RT'),
-                                                backazimuth = baz[2])
+        rotate_bands[I].rotate(method='NE->RT', backazimuth = baz[2])
 
+        for band_select in [rt_bands[I],rotate_bands[I]]:
+            band_select[I].filter(type = 'bandpass',
+                                freqmin = freq_list[I],
+                                freqmax = freq_list[I+1],
+                                corners = 3,
+                                zerophase = True)
+    
     # copy pcoda and filter for BAz analysis
     frtp = rt_pcoda.copy()
     facp = ac_pcoda.copy()
@@ -739,7 +741,6 @@ def ps_arrival_times(distance, depth, init_sec):
                                 source_depth_in_km=depth)
     
     times_p,time_s = [],[]
-
     # from all possible P arrivals, select the earliest 
     pwave_list = ['P','p','Pdiff','PKiKP','PKIKP','PP','Pb','Pn','Pg']
     for i2 in range(len(tt)):
@@ -764,11 +765,13 @@ def ps_arrival_times(distance, depth, init_sec):
 def time_windows(baz, arriv_p, arriv_s, init_sec, is_local):
     """
     Determines time windows for arrivals and subplots for P-waves,
-    S-waves, initial and latter surface waves.
+    S-waves, initial and latter surface waves. Window lengths dependent on event distance
+
 
     :type baz: tuple
-    :param baz: Great circle distance in m, azimuth A->B in degrees,
-        azimuth B->A in degrees.
+    :param baz: [0] Great circle distance in m, 
+                [1] azimuth A->B in degrees,
+                [2] backazimuth B->A in degrees.
     :type arriv_p: float
     :param arriv_p: Arrival time of the first P-wave.
     :type arriv_s: float
@@ -788,7 +791,6 @@ def time_windows(baz, arriv_p, arriv_s, init_sec, is_local):
     :rtype max_lwf: Endtime for latter surface-waves window.
     """
     # TIME WINDOWS (for arrivals and subplots)
-    # Window lengths dependent on event distance
     if is_local == 'non-local':
         min_pw = arriv_p
         max_pw = min_pw + (arriv_s - arriv_p) // 4
@@ -800,7 +802,6 @@ def time_windows(baz, arriv_p, arriv_s, init_sec, is_local):
         min_lwf = max_lwi
         t2 = (baz[0]/1000000) * 60 # 60 sec per 1000 km.
         max_lwf = min_lwf + t2
-
     elif is_local == 'local':
         min_pw = arriv_p
         max_pw = min_pw + 20
@@ -810,8 +811,7 @@ def time_windows(baz, arriv_p, arriv_s, init_sec, is_local):
         max_lwi = min_lwi + 50
         min_lwf = max_lwi
         max_lwf = min_lwf + 80
-
-    elif is_local = 'close':
+    elif is_local == 'close':
         min_pw = arriv_p
         max_pw = min_pw + 7
         min_sw = arriv_s
@@ -856,6 +856,7 @@ def surf_tts(distance, start_time):
          28.6, 30.8, 33., 35.6, 37.4, 39.8, 42., 44.2, 46.4, 48.8, 50.9, 53.6,
          55.2, 57.8, 60.])
     (mval, nval) = np.polyfit(deltas, tts, 1)
+
     # calculate surface wave travel times for degrees 1 to 180 ?
     surftts = mval * np.arange(0., 180.1, 0.01)
     difer = []
@@ -866,6 +867,7 @@ def surf_tts(distance, start_time):
     # love wave arrival: event time + surftts for closest degree??
     # (smallest difference between distance for surftts and actual distance of
     #  event)
+
     arriv_lov = np.floor(start_time + surftts[np.asarray(difer).argmin()])
     diferans = []
     for i1 in range(len(deltas)):
@@ -912,8 +914,9 @@ def get_corrcoefs(rt, rotate, sec, station):
     corrcoefs = []
     rodat = rt[0].data
     for i in range(0, len(rodat) // rot_SR):
-        coeffs = xcorr(rodat[i*rot_SR:(i+1)*rot_SR],
-                        rotate[i*tra_SR:(i+1)*tra_SR ], 0)
+        coeffs = correlate(a = rodat[i*rot_SR:(i+1)*rot_SR],
+                           b = rotate[i*tra_SR:(i+1)*tra_SR], 
+                           shift=0)
 
         corrcoefs.append(coeffs[1])
 
@@ -923,7 +926,7 @@ def get_corrcoefs(rt, rotate, sec, station):
     return corrcoefs, thres
 
 
-def backas_analysis(rt, rodat, acstr, sec, corrcoefs, ind, station):
+def backas_analysis(rt, ac, sec, corrcoefs, ind, station):
 
     """
     Backazimuth analysis: Computes the correlation coefficients for
@@ -952,38 +955,43 @@ def backas_analysis(rt, rodat, acstr, sec, corrcoefs, ind, station):
     :return backas: Vector containing backazimuths (step: 10°).
     """
     compE, compN = station_components(station)
-    rotra_SR = int(rotra.stats.sampling_rate)
-    compN_SR = int(acstr.select(component=compN)[0].stats.sampling_rate)
+
+    rot_SR = int(rt[0].stats.sampling_rate * sec)
+    tra_SR = int(ac[0].stats.sampling_rate * sec) # check
 
     step = 10
     backas = np.linspace(0, 360 - step, 360 / step)
-    corrbaz = []
-    for i6 in range(0, len(backas)):
-        for i7 in range(0, len(corrcoefs)):
-            corrbazz = xcorr(rodat[rotra_SR* sec * i7:rotra_SR * sec *(i7 + 1)],
-                             rotate_ne_rt(acstr.select(component=compN)[0].
-                                          data[0:ind], 
-                                          acstr.select(component=compE)[0].
-                                          data[0:ind], backas[i6])[1]
-                            [compN_SR * sec * i7:compN_SR * sec * (i7 + 1)],0)
-            corrbaz.append(corrbazz[1])
-    corrbaz = np.asarray(corrbaz)
-    corrbaz = corrbaz.reshape(len(backas), len(corrcoefs))
+    
+    corrbaz_list = []
+    for i in range(0, len(backas)):
+        for j in range(0, len(corrcoefs)):
+            rotate = ac.copy()
+            rotate.rotate(
+                method='NE->RT',backazimuth = backas[i]).select(component='T')
+            corrbaz = correlate(a = rt[0].data[j*rot_SR:(j+1)*rot_SR],
+                                b = rotate[0].data[j*tra_SR:(j+1)*tra_SR],
+                                shift = 0)
+            corrbaz_list.append(corrbaz[0])
 
-    maxcorr = []
-    for l1 in range(0, len(corrcoefs)):
-        maxcor_r = backas[corrbaz[:, l1].argmax()]
-        maxcorr.append(maxcor_r)
+    
+    corrbaz_list = np.asarray(corrbaz_list)
+    corrbaz_list = corrbaz_list.reshape(len(backas), len(corrcoefs))
+
+    maxcorr_list = []
+    for k in range(0, len(corrcoefs)):
+        maxcorr = backas[corrbaz_list[:,k].argmax()]
+        maxcorr_list.append(maxcor_r)
+
     maxcorr = np.asarray(maxcorr)
-
-    coefs = [] # array containing max. x-corr coef for each window
-    for m1 in range(0,len(corrcoefs)):
-        coefs.append(np.max(corrbaz[:,m1]))
+    coefs = []
+    # array containing max. x-corr coef for each window
+    for l in range(0,len(corrcoefs)):
+        coefs.append(np.max(corrbaz[:,l]))
 
     return corrbaz, maxcorr, backas, coefs
 
 
-def backas_est(rt, ac, min_sw, max_lwf, station):
+def backas_swave_est(rt, ac, min_sw, max_lwf, station):
     """
     Calculates the sum of all correlation coefficients above a certain
     threshold (0.9) within S-waves and surface waves for each backazimuth.
@@ -1005,50 +1013,58 @@ def backas_est(rt, ac, min_sw, max_lwf, station):
     :return backas2: Vector containing backazimuths (step: 1°).
     """
     compE, compN = station_components(station)
-    rt_SR = int(rt[0].stats.sampling_rate)
-    min_sw_rt = int(round(min_sw*rt_SR))
-    max_lwf_rt = int(round(max_lwf*rt_SR))
 
-    rt2 = rt[0].data[min_sw_rt:max_lwf_rt]
-    acn2 = ac.select(component=compN)[0].data[min_sw_rt:max_lwf_rt]
-    ace2 = ac.select(component=compE)[0].data[min_sw_rt:max_lwf_rt]
-    sec2 = 30
-    step2 = 1
-    backas2 = np.linspace(0, int(360 - step2), int(360 / step2)) # BAz array
-    corrbaz2 = []
+    sec = 30
+    rot_SR = int(rt[0].stats.sampling_rate)
+    rot_SR_sec = int(rt[0].stats.sampling_rate * sec)
 
-    for j3 in range(len(backas2)):
-        for j4 in range(len(rt2) // (rt_SR * sec2)):
-            corrbazz2 = xcorr(rt2[rt_SR * sec2 * j4:rt_SR * sec2 * (j4 + 1)],
-                              rotate_ne_rt(acn2, ace2, backas2[j3])[1]
-                              [rt_SR * sec2 * j4: rt_SR * sec2 * (j4 + 1)], 0)
-            corrbaz2.append(corrbazz2[1]) # corr. coefficients for BAz-array
+    # sample number of surface wave start and end
+    min_sw_rt = int(round(min_sw*rot_SR))
+    max_lwf_rt = int(round(max_lwf*rot_SR))
 
-    corrbaz2 = np.asarray(corrbaz2)
-    corrbaz2 = corrbaz2.reshape(len(backas2), int(round(
-                                    len(corrbaz2) / len(backas2))))
-    corrsum = []
+    # cut streams at surface waves
+    rt_sfc = rt[0].data[min_sw_rt:max_lwf_rt]
+    acN_sfc = ac[0].select(component='N').data[min_sw_rt:max_lwf_rt]
+    acE_sfc = ac[0].select(component='E').data[min_sw_rt:max_lwf_rt]
+
+    step = 1
+    BAz = np.linspace(0, int(360 - step), int(360 / step)) # BAz array
+    corrbaz_list = []
+    # iterate over all BAz values, correlate in time windows
+    for i in range(len(BAz)):
+        for j in range(len(rt_sfc) // rot_SR_sec):
+            acT_sfc = rotate_ne_rt(n = acN_sfc, e = acE_sfc, ba = BAz[i])
+            corrbaz = correlate(a = rt_sfc[j*rot_SR_sec:(j+1)*rot_SR_sec],
+                                b = acT_sfc[j*rot_SR_sec:(j+1)*rot_SR_sec],
+                                shift = 0)  
+
+            corrbaz_list.append(corrbaz[0])
+
+    corrbaz_list = np.asarray(corrbaz_list)
+    corrbaz_list = corrbaz_list.reshape(
+                            len(BAz),int(round(len(corrbz_lista)/len(backas))))
     
-    for j1 in range(len(corrbaz2[:, 0])):
+    # iterate over correlations, choose those > 0.9
+    corrsum_list = []
+    for k in range(len(corrbaz_list[:, 0])):
         bazsum = []
-        for j2 in range(len(corrbaz2[0, :])):
-            if corrbaz2[j1, j2] >= 0.9:
-                corradj = corrbaz2[j1, j2]
+        for l in range(len(corrbaz_list[0, :])):
+            if corrbaz_list[k, l] >= 0.9:
+                bazsum.append(corrbaz_list[k, l])
             else:
-                corradj = 0.0
-            bazsum.append(corradj)
+                bazsum.append(0.0)
+
         bazsum = np.asarray(bazsum)
         bazsum = sum(bazsum)
-        corrsum.append(bazsum)
+        corrsum_list.append(bazsum)
 
     best_ebaz = backas2[np.asarray(corrsum).argmax()] # = EBA!
     max_ebaz_xcoef = np.max(corrbaz2[int(best_ebaz)]) # maximum corr. coeff. for EBA
 
+    return corrsum_list, BAz, max_ebaz_xcoef, best_ebaz
 
-    return corrsum, backas2, max_ebaz_xcoef, best_ebaz
 
-
-def phase_vel(rt, sec, corrcoefs, rotate, corrsum, backas2, ind_band, ind_surf):
+def phase_vel(rt, sec, corrcoefs, rotate, corrsum, backas, ind_band, ind_surf):
 
     """
     Calculates the phase velocities and the estimated backazimuth.
@@ -1073,34 +1089,36 @@ def phase_vel(rt, sec, corrcoefs, rotate, corrsum, backas2, ind_band, ind_surf):
     :return EBA: Estimated backazimuth.
     """
 
-    rt_SR = int(rt[0].stats.sampling_rate)
+    rot_SR = int(rt[0].stats.sampling_rate * sec)
 
     phasv = []
-    if ind_band:  # not dealing with frequency bands
+    # if dealing with freq bands, start at ind_surf
+    if ind_band:  
         start_range = ind_surf
     elif not ind_band:
         start_range = 0
 
-    for i8 in range(start_range, len(corrcoefs)):
-        if corrcoefs[i8] >= 0.75:
-            # Velocity in km/s
-            phas_v = .001 * 0.5 * max(rotate[1][rt_SR * sec * i8:rt_SR * sec
-                                     * (i8 + 1)]) / max(rt[0].data[
-                                rt_SR * sec * i8:rt_SR * sec * (i8 + 1)])
+    # calculate phase velocity (km/s) for correlations >= 0.75
+    for i in range(start_range, len(corrcoefs)):
+        if corrcoefs[i] >= 0.75:
+            phas_v = (.001 * 0.5 * max(rotate[1][i*rot_sr:(i+1)*rot_SR]) / 
+                                  max(rt[0].data[i*rot_SR:(i+1)*rot_SR]))
         else:
             phas_v = np.NaN
         phasv.append(phas_v)
-    phasv = np.asarray(phasv)  # Velocity in km/s
 
+    phasv = np.asarray(phasv)  
+
+    # Determine estimated Backazimuth
     if max(np.asarray(corrsum)) == 0.0:
         EBA = np.nan
     else:
-        EBA = backas2[np.asarray(corrsum).argmax()] # Estimated backazimuth [°]
+        EBA = backas[np.asarray(corrsum).argmax()] 
 
     return phasv,EBA
 
 
-def sn_ratio(full_signal, p_arrival, sam_rate):
+def sn_ratio(full_signal, p_arrival, sampling_rate):
 
     """
     Characterizes the signal-to-noise ratio of the event(s) as the ratio of
@@ -1119,12 +1137,13 @@ def sn_ratio(full_signal, p_arrival, sam_rate):
     :rtype SNR: float
     :return SNR: Signal-to-noise ratio of the seismogram.
     """
-    sam_rate = int(sam_rate)
+    SR = int(sampling_rate)
     p_arrival = int(round(p_arrival))
 
     tr_sign = max(full_signal)
-    tr_noise = abs(np.mean(full_signal[sam_rate * (p_arrival - 180): sam_rate
-                   * (p_arrival - 100)]))
+    tr_noise = abs(np.mean(full_signal[SR * (p_arrival - 180): 
+                                       SR * (p_arrival - 100)]))
+    
     SNR = tr_sign/tr_noise
 
     return SNR
@@ -1149,8 +1168,9 @@ def store_info_json(rotate, ac, rt, corrcoefs, baz, arriv_p, EBA, station,
     :type corrcoefs: numpy.ndarray
     :param corrcoefs: Correlation coefficients.
     :type baz: tuple
-    :param baz: Great circle distance in m, azimuth A->B in degrees,
-        azimuth B->A in degrees.
+    :param baz: [0] Great circle distance in m, 
+                [1] azimuth A->B in degrees,
+                [2] backazimuth B->A in degrees.
     :type arriv_p: float
     :param arriv_p: Arrival time of the first P-wave.
     :type EBA: float
@@ -1346,10 +1366,10 @@ def store_info_json(rotate, ac, rt, corrcoefs, baz, arriv_p, EBA, station,
     outfile.close()
 
 
-def store_info_xml(folder_name,tag_name,station):
+def store_info_xml(event,folder_name,tag_name,station):
 
     """
-    Store extra parameters in the xml file under the namespace rotational
+    Write QuakeML file. Store extra parameters under the namespace rotational
     seismology. Stations are taken care of in nested tags in the extra tag
     of the xml file. Parameters used for filtering events on the JANE database
     framework, taken from .json file 
@@ -1367,11 +1387,11 @@ def store_info_xml(folder_name,tag_name,station):
     filename_xml = os.path.join(folder_name,tag_name + '.xml')
 
     # check if xml already has extra section
-    cat = read_events(pathname_or_url=filename_xml, format='QUAKEML')
     try:
-        cat[0].extra
+        # is this event the same as cat?
+        event[0].extra
     except AttributeError:
-        cat[0].extra = AttribDict()
+        event[0].extra = AttribDict()
 
     # grab data from json file
     data = json.load(open(filename_json))
@@ -1392,15 +1412,17 @@ def store_info_xml(folder_name,tag_name,station):
     params.epicentral_distance.attrib = {'unit':"km"}
     params.theoretical_backazimuth.attrib = {'unit':"degree"}
 
-    cat[0].extra['rotational_parameters_{}'.format(station)] = {'namespace': ns,
-                                                                'value': params}
+    event[0].extra['rotational_parameters_{}'.format(station)] = \
+                                                            {'namespace': ns,
+                                                            'value': params}
 
-    cat.write(filename_xml,"QUAKEML",nsmap={"rotational_seismology_database": 
-                                    r"http://www.rotational-seismology.org"})
+    event.write(filename_xml,"QUAKEML",
+                        nsmap={"rotational_seismology_database": 
+                            r"http://www.rotational-seismology.org"})
 
 
 
-def plotWaveformComp(event, station, link, mode, folder_name, tag_name):
+def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
 
     """
     Compares vertical rotation rate and transversal acceleration through
@@ -1438,7 +1460,7 @@ def plotWaveformComp(event, station, link, mode, folder_name, tag_name):
         reg = False
     
     if link != 'blank':
-        MomentTensor, Magnitude, Region = Get_MomentTensor_Magnitude(link)
+        MomentTensor, Magnitude, Region = get_moment_tensor_magnitude(link)
 
     # =========================================================================
     #                                   PAGE 1
@@ -1520,7 +1542,7 @@ def plotWaveformComp(event, station, link, mode, folder_name, tag_name):
     map.drawgreatcircle(event_lon, event_lat, station_lon, station_lat, 
                                                     linewidth=3, color='yellow')
 
-    # Add beachballs for the event and station triangle
+    # add beachballs for the event and station triangle
     if station == 'RLAS':
         x, y = map(event_lon, event_lat)
         statlon, statlat = map(station_lon, station_lat)
@@ -1717,8 +1739,8 @@ def plotWaveformComp(event, station, link, mode, folder_name, tag_name):
         ax = plt.gca()
         ax.axis('off')
 
-    plt.savefig(os.path.join(folder_name,tag_name + 
-                                        '_{}_page_1.png'.format(station)))
+    plt.savefig(
+        os.path.join(folder_name,tag_name + '_{}_page_1.png'.format(station)))
     plt.close()
     print("Completed and Saved")
 
@@ -1778,6 +1800,7 @@ def plotWaveformComp(event, station, link, mode, folder_name, tag_name):
     plt.ylim(min(rt[0].data), fact1 + max((1. / (2. * c1)) * rotate[1]))
     box_yposition = ((fact1 + max((1. / (2. * c1)) * rotate[1]))
                      - abs(min(rt[0].data)))/2  # box is in middle of figure
+    
     if is_local(baz) == 'non-local':  # gap between annotation and vline
         xgap = 50
     else:
@@ -1863,7 +1886,6 @@ def plotWaveformComp(event, station, link, mode, folder_name, tag_name):
     plt.title(u'2: S-wave (Lowpass, cut-off: %s Hz)' % (cutoff))
     plt.grid(True)
 
-
     # ============================= Surface waves =============================
     plt.subplot2grid((6, 5), (5, 0), colspan=2)
 
@@ -1892,7 +1914,6 @@ def plotWaveformComp(event, station, link, mode, folder_name, tag_name):
               % (cutoff))
     plt.grid(True)
 
-
     # ========================== Later surface waves ==========================
     plt.subplot2grid((6, 5), (5, 3), colspan=2)
 
@@ -1920,8 +1941,8 @@ def plotWaveformComp(event, station, link, mode, folder_name, tag_name):
     plt.title(r'4: Later surface waves (Lowpass, cut-off: %s Hz)' % (cutoff))
     plt.grid(True)
 
-    plt.savefig(os.path.join(folder_name,tag_name + 
-                                            '_{}_page_2.png'.format(station)))
+    plt.savefig(
+        os.path.join(folder_name,tag_name + '_{}_page_2.png'.format(station)))
     plt.close()
     print("Completed and Saved")
 
@@ -1929,8 +1950,7 @@ def plotWaveformComp(event, station, link, mode, folder_name, tag_name):
     #                                
     #                               Cross Correlations
     #
-    # =========================================================================    
-    
+    # ========================================================================= 
     print("Zero-lag correlation coefficients")
     # compare vertical rotation rate and transverse acceleration
     corrcoefs, thres = get_corrcoefs(rt, rotate.select(component='T'), 
@@ -1948,13 +1968,13 @@ def plotWaveformComp(event, station, link, mode, folder_name, tag_name):
     # zero-lag correlation coefficients for range of backazimuths
     print("Backazimuth analysis")
     corrbaz, maxcorr, backas, max_coefs_10deg = \
-        backas_analysis(rt[0], rt[0].data, ac, sec, corrcoefs, None, station)
+        backas_analysis(rt, rotate, sec, corrcoefs, None, station)
 
     X, Y = np.meshgrid(np.arange(0, sec * len(corrcoefs), sec), backas)
 
     # Estimating backazimuth
     print("Estimating backazimuth")
-    corrsum, backas2, max_ebaz_xcoef, best_ebaz = backas_est(
+    corrsum, backas2, max_ebaz_xcoef, best_ebaz = backas_swave_est(
                                             rt, ac, min_sw, max_lwf, station)
 
     # calculate phase veloc. for windows where corrcoef is good enough (.75)
@@ -2000,7 +2020,6 @@ def plotWaveformComp(event, station, link, mode, folder_name, tag_name):
     #                       Estimation of backazimuth figures
     #
     # ========================================================================= 
-
     print("\nPage 3, cross-correlation and phase velocity figures")
 
     plt.figure(figsize=(18, 9))
@@ -2027,7 +2046,6 @@ def plotWaveformComp(event, station, link, mode, folder_name, tag_name):
     plt.ylim(0, 16)
     plt.grid(True)
 
-
     fig = plt.subplot2grid((4, 26), (1, 25))
     cmap = mpl.cm.autumn_r
     norm = mpl.colors.Normalize(vmin=0.75, vmax=1)
@@ -2050,7 +2068,6 @@ def plotWaveformComp(event, station, link, mode, folder_name, tag_name):
     plt.ylim(min_corr, 1)
     plt.legend(loc=4, shadow=True)
     plt.grid(True)
-
 
     plt.subplot2grid((4, 26), (3, 0), colspan=25)
     teobaz = baz[2] * np.ones(len(corrcoefs) + 1)
@@ -2080,11 +2097,10 @@ def plotWaveformComp(event, station, link, mode, folder_name, tag_name):
     cb1.set_label(r'X-corr. coeff.', fontweight='bold')
     cb1.set_ticks([-1.0,-0.75,-0.5,-0.25,0.0,0.25,0.5,0.75,1.0])
     
-    plt.savefig(os.path.join(folder_name,tag_name + 
-                                            '_{}_page_3.png'.format(station)))
+    plt.savefig(
+        os.path.join(folder_name,tag_name + '_{}_page_3.png'.format(station)))
     plt.close()
     print("Completed and Saved")
-
 
     # ======================================================================== 
     #                                
@@ -2116,6 +2132,7 @@ def plotWaveformComp(event, station, link, mode, folder_name, tag_name):
     max_lwi_ac = int(round(ac_pc_SR * max_lwi))
     ind = int(round(max_lwi * facp[0].stats.sampling_rate))
 
+# include rotate
     corrbazp, maxcorrp, backas, max_coefs_10deg_p = backas_analysis(frtp[0], 
                             rt_pcodaxc, facp, sec_p, corrcoefs_p, ind, station)
 
@@ -2200,11 +2217,10 @@ def plotWaveformComp(event, station, link, mode, folder_name, tag_name):
     cb1.set_label(r'X-corr. coeff.', fontweight='bold')
     cb1.set_ticks([-1.0,-0.75,-0.5,-0.25,0.0,0.25,0.5,0.75,1.0])
    
-    plt.savefig(os.path.join(folder_name,tag_name + 
-                                            '_{}_page_4.png'.format(station)))
+    plt.savefig(
+        os.path.join(folder_name,tag_name + '_{}_page_4.png'.format(station)))
     plt.close()
     print("Completed and Saved")
-
 
     # ======================================================================== 
     #                                
@@ -2212,11 +2228,12 @@ def plotWaveformComp(event, station, link, mode, folder_name, tag_name):
     #
     # ========================================================================= 
     print("Storing event information in JSON and XML")
+    
     store_info_json(rotate, ac, rt, corrcoefs, baz, arriv_p, EBA, station, 
-                    phasv_means, phasv_stds, startev, event, data_sources 
+                    phasv_means, phasv_stds, startev, event, data_sources, 
                     depth, max_ebaz_xcoef, folder_name, tag_name)
 
-    store_info_xml(folder_name,tag_name,station)
+    store_info_xml(event,folder_name,tag_name,station)
 
     print("Done\n")
 
@@ -2250,7 +2267,7 @@ def generate_tags(event):
     for search, replace in substitutions:
         flinn_engdahl = flinn_engdahl.replace(search,replace)
 
-    # remove '.' from end of region name if necessary (i.e. _P.N.G.)
+    # remove '.' from end of region name if necessary (i.e. _P.N.G. > _.P.N.G)
     if flinn_engdahl[-1] == '.':
         flinn_engdahl = flinn_engdahl[:-1]
 
@@ -2395,82 +2412,83 @@ if __name__ == '__main__':
     bars = '='*79
     error_list = []
     for event in cat:
-        try:
-            tag_name, folder_name, check_folder_exists = generate_tags(event)
+        tag_name, folder_name, check_folder_exists = generate_tags(event)
+        plot_waveform_comp(event, station, link, mode, folder_name, tag_name)
+        # try:
+            # tag_name, folder_name, check_folder_exists = generate_tags(event)
 
-            # check if current event folder exists
-            if check_folder_exists:
-                # check if event source is the same, assumes 0 or 1 files found
-                if (os.path.basename(check_folder_exists[0]) != 
-                                                os.path.basename(folder_name)):
-                    print('This event was processed with another mode\n')
-                    already_processed += 1
-                    continue
+            # # check if current event folder exists
+            # if check_folder_exists:
+            #     # check if event source is the same, assumes 0 or 1 files found
+            #     if (os.path.basename(check_folder_exists[0]) != 
+            #                                     os.path.basename(folder_name)):
+            #         print('This event was processed with another mode\n')
+            #         already_processed += 1
+            #         continue
 
-                # if new station, run waveform compare again
-                try:
-                    filename_json = os.path.join(folder_name,tag_name + '.json')
-                    data = json.load(open(filename_json))
-                    if data['station_information_{}'.format(station)]:
-                        print("This event was already processed\n")
-                        already_processed += 1
-                    else:
-                        try:
-                            plotWaveformComp(event, station, link, mode,
-                                                        folder_name, tag_name)
-                            success_counter += 1
+            #     # if new station, run waveform compare again
+            #     try:
+            #         filename_json = os.path.join(folder_name,tag_name + '.json')
+            #         data = json.load(open(filename_json))
+            #         if data['station_information_{}'.format(station)]:
+            #             print("This event was already processed\n")
+            #             already_processed += 1
+            #         else:
+            #             try:
+            #                 plot_waveform_comp(event, station, link, mode,
+            #                                             folder_name, tag_name)
+            #                 success_counter += 1
 
-                        # if any error, remove folder, continue
-                        except Exception as e:
-                            fail_counter += 1
-                            print(e)
-                            print("Removing incomplete folder...\n")
-                            error_list.append(tag_name)
-                            shutil.rmtree(folder_name)
+            #             # if any error, remove folder, continue
+            #             except Exception as e:
+            #                 fail_counter += 1
+            #                 print(e)
+            #                 print("Removing incomplete folder...\n")
+            #                 error_list.append(tag_name)
+            #                 shutil.rmtree(folder_name)
 
-                        # if keyboard interrupt, remove folder, quit
-                        except KeyboardInterrupt:
-                            print("Removing incomplete folder...\n")
-                            shutil.rmtree(folder_name)
-                            sys.exit()
+            #             # if keyboard interrupt, remove folder, quit
+            #             except KeyboardInterrupt:
+            #                 print("Removing incomplete folder...\n")
+            #                 shutil.rmtree(folder_name)
+            #                 sys.exit()
 
-                # if json not found, folder is incomplete, continue
-                except FileNotFoundError:
-                    fail_counter += 1 
-                    error_list.append(tag_name)
-                    print("Incomplete folder found\n")
+            #     # if json not found, folder is incomplete, continue
+            #     except FileNotFoundError:
+            #         fail_counter += 1 
+            #         error_list.append(tag_name)
+            #         print("Incomplete folder found\n")
 
             
-            # event encountered for the first time, create folder, xml, process
-            elif not check_folder_exists:  
-                os.makedirs(str(folder_name))
-                event.write(os.path.join(folder_name,tag_name + '.xml'), 
-                                                            format='QUAKEML')
-                # run processing function
-                try:
-                    plotWaveformComp(event, station, link, mode,
-                                                        folder_name, tag_name)
-                    success_counter += 1
+            # # event encountered for the first time, create folder, xml, process
+            # elif not check_folder_exists:  
+            #     os.makedirs(str(folder_name))
                 
-                # if any error, remove folder, continue
-                except Exception as e:
-                    fail_counter += 1
-                    print(e)
-                    print("Removing incomplete folder...\n")
-                    error_list.append(tag_name)
-                    shutil.rmtree(folder_name)
+            #     # run processing function
+            #     try:
+            #         plot_waveform_comp(event, station, link, mode,
+            #                                             folder_name, tag_name)
+            #         success_counter += 1
+                
+            #     # if any error, remove folder, continue
+            #     except Exception as e:
+            #         fail_counter += 1
+            #         print(e)
+            #         print("Removing incomplete folder...\n")
+            #         error_list.append(tag_name)
+            #         shutil.rmtree(folder_name)
                
-                # if keyboard interrupt, remove folder, quit
-                except KeyboardInterrupt:
-                    fail_counter += 1
-                    print("Removing incomplete folder...\n")
-                    shutil.rmtree(folder_name)
-                    sys.exit()
+            #     # if keyboard interrupt, remove folder, quit
+            #     except KeyboardInterrupt:
+            #         fail_counter += 1
+            #         print("Removing incomplete folder...\n")
+            #         shutil.rmtree(folder_name)
+                    # sys.exit()
 
-        # if error creating tags, continue
-        except Exception as e:
-            fail_counter += 1
-            print("Error in folder/tag name creation; ",e)
+        # # if error creating tags, continue
+        # except Exception as e:
+        #     fail_counter += 1
+        #     print("Error in folder/tag name creation; ",e)
 
     # print end message
     print('{}\n'.format('_'*79))
