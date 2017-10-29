@@ -660,8 +660,8 @@ def filter_and_rotate(ac, rt, baz, rt_pcoda, ac_pcoda, cutoff, cutoff_pc,
     number_of_bands = len(freq_list) - 1
     
     # copies for phase velocities and pcoda analysis
-    ac_pcoda_full = ac.copy()
-    rt_pcoda_full = rt.copy()
+    ac_pcoda_coarse = ac.copy()
+    rt_pcoda_coarse = rt.copy()
     rt_bands = [rt.copy() for _ in range(number_of_bands)]
     rotate_bands = [ac.copy() for _ in range(number_of_bands)]
 
@@ -670,8 +670,8 @@ def filter_and_rotate(ac, rt, baz, rt_pcoda, ac_pcoda, cutoff, cutoff_pc,
     rt.filter('lowpass', freq=cutoff, corners=2, zerophase=True)
     ac.filter('highpass', freq=0.005, corners=2, zerophase=True)
     rt.filter('highpass', freq=0.005, corners=2, zerophase=True)
-    ac_pcoda_full.filter('highpass', freq=cutoff_pc, corners=2, zerophase=True)
-    rt_pcoda_full.filter('highpass', freq=cutoff_pc, corners=2, zerophase=True)
+    ac_pcoda_coarse.filter('highpass', freq=cutoff_pc, corners=2, zerophase=True)
+    rt_pcoda_coarse.filter('highpass', freq=cutoff_pc, corners=2, zerophase=True)
 
     # filter out secondary microseisms (5-12s) for non-local events
     if is_local == "non-local":    
@@ -683,11 +683,11 @@ def filter_and_rotate(ac, rt, baz, rt_pcoda, ac_pcoda, cutoff, cutoff_pc,
     # rotate translational signals to theoretical event backazimuth
     rotate = ac.copy()
     pcoda_rotate = ac_pcoda.copy()
-    pcoda_rotate_full = ac_pcoda_full.copy()
+    pcoda_rotate_coarse = ac_pcoda_coarse.copy()
 
     rotate.rotate(method = 'NE->RT')
     pcoda_rotate.rotate(method = 'NE->RT')
-    pcoda_rotate_full.rotate(method = 'NE->RT')
+    pcoda_rotate_coarse.rotate(method = 'NE->RT')
     
     # for varying frequency bands, rotate to BAz, filter both RT and Rotate 
     for I in range(number_of_bands):
@@ -710,7 +710,7 @@ def filter_and_rotate(ac, rt, baz, rt_pcoda, ac_pcoda, cutoff, cutoff_pc,
     filt_rotate.rotate(method = 'NE->RT')
 
 
-    return rt_bands, rotate_bands, rotate, rt_pcoda_full, pcoda_rotate_full, \
+    return rt_bands, rotate_bands, rotate, rt_pcoda_coarse, pcoda_rotate_coarse, \
             filt_rt_pcoda, filt_ac_pcoda, filt_rotate 
 
 
@@ -821,7 +821,8 @@ def time_windows(DS, arriv_p, arriv_s, init_sec, is_local):
         min_lwf = int(max_lwi)
         max_lwf = int(min_lwf + 80)
 
-    # I wrote a dictionary but it's not so useful...
+    # I wrote a dictionary but it's not so useful... :/
+
     # arrivals = {'pwave_start': min_pw,
     #             'pwave_end': max_pw,
     #             'swave_start': min_sw,
@@ -1163,7 +1164,7 @@ def sn_ratio(full_signal, p_arrival, sampling_rate):
     return SNR
 
 
-def store_info_json(rotate, ac, rt, corrcoefs, baz, arriv_p, EBA, station, 
+def store_info_json(rt, ac, trv_acc, corrcoefs, dist_baz, arriv_p, EBA, station, 
                     phasv_means, phasv_stds, startev, event, data_sources, 
                     depth, max_ebaz_xcoef, folder_name, tag_name):
 
@@ -1210,12 +1211,11 @@ def store_info_json(rotate, ac, rt, corrcoefs, baz, arriv_p, EBA, station,
     PRZ = max(rt[0].data)  # Peak vertical rotation rate [nrad/s]
     PCC = max(corrcoefs)  # Peak correlation coefficient
     MCC = min(corrcoefs) # Minimum correlation coefficient
-    TBA = BAz  # Theoretical backazimuth [°]
-    DS_KM = 0.001 * DS # Epicentral Distance [km]
+    TBA = dist_baz[2]  # Theoretical backazimuth [°]
+    DS_KM = 0.001 * dist_baz[0] # Epicentral Distance [km]
     DS_DEG =  DS_KM / 111.11 # Epicentral Distance [°]
-    SNT = sn_ratio(trv_acc[0].data, arriv_p, ac.select(component=compN)[0].
-                                        stats.sampling_rate)  # Transv. Acc SNR
-    SNR = sn_ratio(rt[0].data, arriv_p, rt[0].stats.sampling_rate) # SNR for RR
+    SNT = sn_ratio(ac[0].data, arriv_p, ac[0].stats.sampling_rate) 
+    SNR = sn_ratio(rt[0].data, arriv_p, rt[0].stats.sampling_rate) 
 
     # common event dictionary
     dic_event = OrderedDict([
@@ -1236,25 +1236,25 @@ def store_info_json(rotate, ac, rt, corrcoefs, baz, arriv_p, EBA, station,
     dic_station = OrderedDict([
             ('station_information_{}'.format(station), 
                 OrderedDict([
-                ('station_latitude', rt[0].stats.coordinates['latitude']),
-                ('station_longitude', rt[0].stats.coordinates['longitude']),
+                ('station_latitude', rt[0].stats.coordinates.latitude),
+                ('station_longitude', rt[0].stats.coordinates.longitude),
                 ('rotation_station', 
                     OrderedDict([
-                    ('network', net_r),
-                    ('station', sta_r),
-                    ('loc', loc_r),
-                    ('channel', chan1),
+                    ('network', rt[0].stats.network),
+                    ('station', rt[0].stats.station),
+                    ('loc', rt[0].stats.location),
+                    ('channel', rt[0].stats.channel),
                     ('data_source', data_sources['BJZ'])
                     ])
                 ),
                 ('translation_station', 
                     OrderedDict([
-                    ('network', net_s),
-                    ('station', sta_s),
-                    ('loc', loc_s),
-                    ('channel_N', chan3),
-                    ('channel_E', chan2),
-                    ('channel_Z', chan4),
+                    ('network', trv_acc[0].stats.network),
+                    ('station', trv_acc[0].stats.station),
+                    ('loc', trv_acc[0].stats.location),
+                    ('channel_N', ac.select(component='N')[0].stats.channel),
+                    ('channel_E', ac.select(component='E')[0].stats.channel),
+                    ('channel_Z', ac.select(component='Z')[0].stats.channel),
                     ('data_source', data_sources['BHN'])
                     ])
                 ),
@@ -1395,17 +1395,19 @@ def store_info_xml(event,folder_name,tag_name,station):
     :type station: str
     :param station: Station from which data are fetched (i.e. 'RLAS').
     """
-
     ns = 'http://www.rotational-seismology.org'
     filename_json = os.path.join(folder_name,tag_name + '.json')
     filename_xml = os.path.join(folder_name,tag_name + '.xml')
 
+    # check if xml already exists
+    if os.path.exists(filename_xml):
+        event = read_events(filename_xml,format='QUAKEML')[0]
+
     # check if xml already has extra section
     try:
-        # is this event the same as cat?
-        event[0].extra
+        event.extra
     except AttributeError:
-        event[0].extra = AttribDict()
+        event.extra = AttribDict()
 
     # grab data from json file
     data = json.load(open(filename_json))
@@ -1426,11 +1428,11 @@ def store_info_xml(event,folder_name,tag_name,station):
     params.epicentral_distance.attrib = {'unit':"km"}
     params.theoretical_backazimuth.attrib = {'unit':"degree"}
 
-    event[0].extra['rotational_parameters_{}'.format(station)] = \
+    event.extra['rotational_parameters_{}'.format(station)] = \
                                                             {'namespace': ns,
                                                             'value': params}
 
-    event.write(filename_xml,"QUAKEML",
+    event.write(filename_xml,'QUAKEML',
                         nsmap={"rotational_seismology_database": 
                             r"http://www.rotational-seismology.org"})
 
@@ -1779,7 +1781,7 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
 
     print("Filtering and rotating traces...")
     # filter raw data, rotate some to theoretical backazimuth
-    rt_bands, rotate_bands, rotate, rt_pcoda_full, pcoda_rotate_full, \
+    rt_bands, rotate_bands, rotate, rt_pcoda_coarse, pcoda_rotate_coarse, \
     filt_rt_pcoda, filt_ac_pcoda, filt_rotate = filter_and_rotate(ac, rt, BAz, 
                 rt_pcoda, ac_pcoda, cutoff, cutoff_pc, station, is_local(DS))
 
@@ -1850,10 +1852,10 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
     
     # integer sampling rate for slice indexing
     rt_SR = int(rt[0].stats.sampling_rate)
-    rt_pcoda_SR = int(rt_pcoda_full[0].stats.sampling_rate)
+    rt_pcoda_SR = int(rt_pcoda_coarse[0].stats.sampling_rate)
     
     # transverse acceleration pcoda
-    pc_trv_acc = pcoda_rotate_full.select(component='T')
+    pc_trv_acc = pcoda_rotate_coarse.select(component='T')
 
     # pwave arrival times in samples for normal trace and pcoda
     min_pw_rt = rt_SR * min_pw
@@ -1863,15 +1865,15 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
 
     # pcoda phase velocity
     cp = 0.5 * (max(abs(pc_trv_acc[0][min_pw_pcrt:max_pw_pcrt]))/
-                max(abs(rt_pcoda_full[0].data[min_pw_pcrt:max_pw_pcrt])))
+                max(abs(rt_pcoda_coarse[0].data[min_pw_pcrt:max_pw_pcrt])))
 
     # find min and max trace amplitudes for y-limits
     min_ta_pcod = min((0.5 / cp) * pc_trv_acc[0][min_pw_rt:max_pw_rt])
     max_ta_pcod = max((0.5 / cp) * pc_trv_acc[0][min_pw_rt:max_pw_rt])
-    min_rt_pcod = min(rt_pcoda_full[0].data[min_pw_rt:max_pw_rt])
-    max_rt_pcod = max(rt_pcoda_full[0].data[min_pw_rt:max_pw_rt])
+    min_rt_pcod = min(rt_pcoda_coarse[0].data[min_pw_rt:max_pw_rt])
+    max_rt_pcod = max(rt_pcoda_coarse[0].data[min_pw_rt:max_pw_rt])
 
-    plt.plot(time, rt_pcoda_full[0].data, color='r')
+    plt.plot(time, rt_pcoda_coarse[0].data, color='r')
     plt.plot(time, (0.5 / cp) * pc_trv_acc[0], color='k')
     plt.xlim(min_pw, max_pw)
     plt.ylim(min([min_ta_pcod, min_ta_pcod]), max([max_rt_pcod, max_rt_pcod]))
@@ -2131,7 +2133,6 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
     print("ZLCC...",end=" ")
 
     # integer sampling rates
-    import pdb;pdb.set_trace()
     rt_pc_SR = int(filt_rt_pcoda[0].stats.sampling_rate)
     trv_pc_SR = int(filt_rotate[0].stats.sampling_rate)
     
@@ -2143,16 +2144,18 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
     vrt_acc_pcoda = filt_rotate.select(component='Z')
 
     # cut pcoda at correct time window and taper cuts
-    rt_pcoda_cut = filt_rt_pcoda[0].data[0:lwi_average * rt_pc_SR]
-    trv_pcoda_cut = trv_acc_pcoda[0].data[0:lwi_average * trv_pc_SR]
-    for traces in [rt_pcoda_cut,trv_pcoda_cut,ver_pcoda_cut]:
+    rt_pcoda_cut = filt_rt_pcoda.copy()
+    trv_pcoda_cut = trv_acc_pcoda.copy()
+    rt_pcoda_cut[0].data = filt_rt_pcoda[0].data[0:lwi_average * rt_pc_SR]
+    trv_pcoda_cut[0].data = trv_pcoda_cut[0].data[0:lwi_average * trv_pc_SR]
+    for traces in [rt_pcoda_cut,trv_pcoda_cut]:
         traces.taper(max_percentage=0.05)
 
     # find correlations
     corrcoefs_p, thres_p = get_corrcoefs(rt_pcoda_cut, trv_pcoda_cut, sec_p,
                                                                         station)
 
-    print("BAz...",end=" ")
+    print("BAz...")
 
     # surface wave start sample
     max_lwi_ac = trv_pc_SR * max_lwi
@@ -2186,7 +2189,7 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
     #
     # ========================================================================= 
 
-    print("\nPage 4 > P-Coda Cross-correlations",end=" ")
+    print("\nPage 4 > P-Coda Waveform Comparison...",end=" ")
     plt.figure(figsize=(18, 9))
     plt.subplot2grid((5, 26), (0, 0), colspan=25)
     plt.plot(time_p, vrt_acc_pcoda[0].data, color='g')
@@ -2204,16 +2207,16 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
     plt.subplot2grid((5, 26), (1, 0), colspan=25, rowspan=2)
 
     plt.plot(time_p, rt_pcoda[0].data, color='r', label=r'Rotation rate')
-    plt.plot(time_p, (0.5 / c1_p) * pc_trv_acc[0].data + fact1_p, color='k',
+    plt.plot(time_p, (0.5 / c1_p) * trv_acc_pcoda[0].data + fact1_p, color='k',
                                              label=r'Transversal acceleration')
     plt.ylabel(r'$\dot{\mathbf{\Omega}}_\mathbf{z}$ [nrad/s] -'
                    'a$_\mathbf{T}$/2c [1/s]', fontweight='bold', fontsize=11)
     plt.xlim(0, (min_lwi + max_lwi) // 2)
     plt.ylim(min(rt_pcoda[0].data[0:max_lwi_ac]), 
-            fact1_p + max((1. / (2. * c1_p)) * pcoda_rotate[1][0: max_lwi_ac]))
+        fact1_p + max((1. / (2. * c1_p)) * trv_acc_pcoda[0].data[0:max_lwi_ac]))
     xlim2 = (min_lwi + max_lwi) // 2
     box_yposition2 = (fact1_p + max((1. / (2. * c1_p)) * 
-                        pcoda_rotate[1][0:max_lwi_ac]) -
+                        trv_acc_pcoda[0].data[0:max_lwi_ac]) -
                         np.abs(min(rt_pcoda[0].data[0: max_lwi_ac])))/2.
     plt.axvline(x=min_pw, linewidth=1)
     plt.annotate('P-arrival', 
@@ -2251,6 +2254,8 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
     cb1.set_label(r'X-corr. coeff.', fontweight='bold')
     cb1.set_ticks([-1.0,-0.75,-0.5,-0.25,0.0,0.25,0.5,0.75,1.0])
    
+    # ============================= Save Figure ============================== 
+
     plt.savefig(
         os.path.join(folder_name,tag_name + '_{}_page_4.png'.format(station)))
     plt.close()
@@ -2261,9 +2266,9 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
     #                        Store in Json and XML files
     #
     # ========================================================================= 
-    print("Storing event information in JSON and XML files...",end="")
+    print("\n>> Storing event information in JSON and XML files...",end=" ")
     
-    store_info_json(rotate, ac, rt, corrcoefs, BAz, arriv_p, EBA, station, 
+    store_info_json(rt, ac, trv_acc, corrcoefs, dist_baz, arriv_p, EBA, station, 
                     phasv_means, phasv_stds, startev, event, data_sources, 
                     depth, max_ebaz_xcoef, folder_name, tag_name)
 
