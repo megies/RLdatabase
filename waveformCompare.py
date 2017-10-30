@@ -310,29 +310,6 @@ def event_info_data(event, station, mode, polarity, instrument):
     return event_lat, event_lon, depth, startev, rt, ac, dist_baz, data_sources
 
 
-def station_components(station):
-
-    """
-    The East and North components have different labels in the WET and PFO
-    data. They are standardized by this function.
-
-    :type station: str
-    :param station: Station from which data are fetched (i.e. 'RLAS').
-    :rtype compE: str
-    :return compE: Label for East component depending on station.
-    :rtype compN: str
-    return compN: Label for North component depending on station.
-    """
-
-    if station == 'RLAS':
-        compE = 'E'
-        compN = 'N'
-    elif station == 'PFO':
-        compE = '1'
-        compN = '2'
-    return compE, compN
-
-
 def is_local(distance):
 
     """
@@ -653,7 +630,6 @@ def filter_and_rotate(ac, rt, baz, rt_pcoda, ac_pcoda, cutoff, cutoff_pc,
     :rtype cop_rt: :class: `~obspy.core.stream.Stream`
     :return cop_rt: Highpass filtered rotational trace (rt).
     """
-    compE, compN = station_components(station)
 
     # set the list of frequencies for to bandpass filter for
     freq_list = [0.01, 0.02, 0.04, 0.1, 0.2, 0.3, 0.4, 0.6, 1.0]
@@ -823,7 +799,7 @@ def time_windows(DS, arriv_p, arriv_s, init_sec, is_local):
 
     # I wrote a dictionary but it's not so useful... :/
 
-    # arrivals = {'pwave_start': min_pw,
+    # arrival_dic = {'pwave_start': min_pw,
     #             'pwave_end': max_pw,
     #             'swave_start': min_sw,
     #             'swave_end': max_sw,
@@ -907,7 +883,6 @@ def get_corrcoefs(streamA, streamB, sec, station):
     :rtype thres: numpy.ndarray
     :return thres: Array for plotting dashed line of 75'%' correlation.
     """
-    compE, compN = station_components(station)
 
     # time window in samples
     strA_TW = int(streamA[0].stats.sampling_rate * sec)
@@ -927,7 +902,7 @@ def get_corrcoefs(streamA, streamB, sec, station):
     return corrcoefs, thres
 
 
-def baz_analysis(streamA, streamB, sec, station):
+def baz_analysis(rt, ac, sec, station):
 
     """
     Backazimuth analysis: Computes the correlation coefficients for
@@ -958,23 +933,26 @@ def baz_analysis(streamA, streamB, sec, station):
     :rtype backas: numpy.ndarray
     :return backas: Vector containing backazimuths (step: 10°).
     """
-    compE, compN = station_components(station)
 
     # time window in samples
-    strA_TW = int(streamA[0].stats.sampling_rate * sec)
-    strB_TW = int(streamB[0].stats.sampling_rate * sec)
+    rt_TW = int(rt[0].stats.sampling_rate * sec)
+    ac_TW = int(ac[0].stats.sampling_rate * sec)
 
     # create a list of backazimuths to iterate over
     step = 10
-    corr_length = len(streamA[0].data) // strA_TW
+    corr_length = len(rt[0].data) // rt_TW
     backas = np.linspace(0, 360 - step, 360 / step)
     
-    # iterate over BAz and length of correlation trace
+    # iterate over BAz, rotate, correlate trace
     corrbaz_list = []
-    for i in range(0, len(backas)):
+    for BAZ in backas:
         for j in range(0, corr_length):
-            corrbaz = correlate(a = streamA[0].data[j*strA_TW:(j+1)*strA_TW],
-                                b = streamB[0].data[j*strB_TW:(j+1)*strB_TW],
+            rotate_tmp = ac.copy()
+            rotate_tmp.rotate(method='NE->RT', back_azimuth = BAZ)
+            trv_acc = rotate_tmp.select(component='T')
+
+            corrbaz = correlate(a = rt[0].data[j*rt_TW:(j+1)*rt_TW],
+                                b = trv_acc[0].data[j*ac_TW:(j+1)*ac_TW],
                                 shift = 0)
             corrbaz_list.append(corrbaz[0])
 
@@ -984,17 +962,16 @@ def baz_analysis(streamA, streamB, sec, station):
     # find maximum correlations
     maxcorr_list = []
     for k in range(0, corr_length):
-        maxcorr = backas[corrbaz_list[:,k].argmax()]
-        maxcorr_list.append(maxcorr)
+        maxcorr_list.append(backas[corrbaz_list[:,k].argmax()])
 
     maxcorr_list = np.asarray(maxcorr_list)
 
     # array containing max corr coef for each window
-    coefs = []    
+    coefs_list = []    
     for l in range(0, corr_length):
-        coefs.append(np.max(corrbaz_list[:,l]))
+        coefs_list.append(np.max(corrbaz_list[:,l]))
 
-    return corrbaz_list, maxcorr_list, backas, coefs
+    return corrbaz_list, maxcorr_list, backas, coefs_list
 
 
 def estimate_baz(rt, trv_acc, start_sw, end_sw, station):
@@ -1018,7 +995,6 @@ def estimate_baz(rt, trv_acc, start_sw, end_sw, station):
     :rtype baz_list: numpy.ndarray
     :return baz_list: Vector containing backazimuths (step: 1°).
     """
-    compE, compN = station_components(station)
 
     # set integer sampling rates
     rt_SR = int(rt[0].stats.sampling_rate)
@@ -1202,7 +1178,7 @@ def store_info_json(rt, ac, trv_acc, corrcoefs, dist_baz, arriv_p, EBA, station,
     :type tag_name: string
     :param tag_name: Handle of the event.
     """
-    compE, compN = station_components(station)
+
     orig = event.preferred_origin() or event.origins[0] # Event origin
     catalog = orig.creation_info.author or orig.creation_info.agency_id
     magnitude = event.preferred_magnitude() or event.magnitudes[0] # Mag info.
@@ -1489,7 +1465,36 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
     #
     # =========================================================================
     print("\nPage 1 > Title Card...", end=" ")
-    if is_local(DS) == 'local':
+
+    if is_local(DS) == 'non-local': 
+        if DS <= 13000000:
+            plt.figure(figsize=(18, 9))
+            plt.subplot2grid((4, 9), (0, 4), colspan=5, rowspan=4)
+
+            # globe plot
+            map = Basemap(projection='ortho', 
+                            lat_0=(station_lat + event_lat) / 2, 
+                            lon_0=(station_lon + event_lon) / 2, 
+                            resolution='l')
+            map.drawmeridians(np.arange(0, 360, 30))
+            map.drawparallels(np.arange(-90, 90, 30))
+        elif DS > 13000000:
+            plt.figure(figsize=(18, 9))
+            plt.subplot2grid((4, 9), (0, 4), colspan=5, rowspan=4)
+
+            # If the great circle between the station and event is crossing the
+            # 180° meridian in the pacific and the stations are far apart the map
+            # has to be re-centered, otherwise wrong side of globe.
+            if abs(station_lon - event_lon) > 180:
+                lon0 = 180 + (station_lon + event_lon) / 2
+            else:
+                lon0 = (station_lon + event_lon) / 2
+
+            map = Basemap(projection='moll', lon_0=lon0, resolution='l')
+            map.drawmeridians(np.arange(0, 360, 30))
+            map.drawparallels(np.arange(-90, 90, 30))
+
+    elif is_local(DS) == 'local':
         plt.figure(figsize=(18, 9))
         plt.subplot2grid((4, 9), (0, 4), colspan=5, rowspan=4)
 
@@ -1503,34 +1508,6 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
         map.drawparallels(np.arange(0., 90, 5.), labels=[1, 0, 0, 1])
         map.drawmeridians(np.arange(0., 360., 5.), labels=[1, 0, 0, 1])
         map.drawstates(linewidth=0.25)
-
-    elif is_local(DS) == 'non-local' and DS <= 13000000:
-        plt.figure(figsize=(18, 9))
-        plt.subplot2grid((4, 9), (0, 4), colspan=5, rowspan=4)
-
-        # globe plot
-        map = Basemap(projection='ortho', 
-                        lat_0=(station_lat + event_lat) / 2, 
-                        lon_0=(station_lon + event_lon) / 2, 
-                        resolution='l')
-        map.drawmeridians(np.arange(0, 360, 30))
-        map.drawparallels(np.arange(-90, 90, 30))
-
-    elif is_local(DS) == 'non-local' and DS > 13000000:
-        plt.figure(figsize=(18, 9))
-        plt.subplot2grid((4, 9), (0, 4), colspan=5, rowspan=4)
-
-        # If the great circle between the station and event is crossing the
-        # 180° meridian in the pacific and the stations are far apart the map
-        # has to be re-centered, otherwise wrong side of globe.
-        if abs(station_lon - event_lon) > 180:
-            lon0 = 180 + (station_lon + event_lon) / 2
-        else:
-            lon0 = (station_lon + event_lon) / 2
-
-        map = Basemap(projection='moll', lon_0=lon0, resolution='l')
-        map.drawmeridians(np.arange(0, 360, 30))
-        map.drawparallels(np.arange(-90, 90, 30))
 
     elif is_local(DS) == 'close':
         plt.figure(figsize=(26, 13))
@@ -1766,7 +1743,6 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
     plt.close()
     print("Done")
 
-
     # ======================================================================== 
     #                                   
     #               Preprocessing of rotations and translations
@@ -1808,7 +1784,7 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
     fact1 = 2 * max(rt[0].data)  # Factor to displace the rotation rate
     time = rt[0].stats.delta * np.arange(0, len(rt[0].data))  # time in seconds
 
-    # plotting
+    # main figure
     plt.figure(figsize=(18, 9))
     plt.subplot2grid((6, 5), (2, 0), colspan=5, rowspan=2)
     plt.plot(time, rt[0].data, color='r', label=r'Rotation rate')
@@ -1828,7 +1804,6 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
     else:
         xgap = 15
 
-    xlim1 = rt[0].stats.delta * len(rt[0].data)  # needed for p-coda later
     bbox_props = dict(boxstyle="square, pad=0.3", fc='white')
     plt.axvline(x=min_pw, linewidth=1)
     plt.annotate('1', xy=(min_pw+xgap, box_yposition), fontsize=14,
@@ -1971,7 +1946,7 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
 
     # ======================================================================== 
     #                                
-    #                               Cross Correlations
+    #                Cross Correlations and Phase Velocities
     #
     # ========================================================================= 
     print("Finding zero-lag correlation coefficients...")
@@ -1995,16 +1970,13 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
     # zero-lag correlation coefficients for range of backazimuths
     print("Analyzing correlation by BAz bins...")
     corrbaz, maxcorr, backas, max_coefs_10deg = baz_analysis(
-                                                    rt, trv_acc, sec, station)
-
-    X, Y = np.meshgrid(np.arange(0, sec * len(corrcoefs), sec), backas)
+                                                    rt, ac, sec, station)
 
     # estimate backazimuth and correlations for given BAz
     print("Estimating best backazimuth value...")
     corrsum, baz_list, max_ebaz_xcoef, EBA = estimate_baz(
                                         rt, trv_acc, min_sw, max_lwf, station)
 
-    # calculate phase velocity for windows where correlation > 0.75
     print("Calculating phase velocities...")
 
     # calculate phase velocities starting at surface wave arrivals 
@@ -2031,16 +2003,19 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
             phasv_means.append(np.NaN)
             phasv_stds.append(np.NaN)
 
-
+    import pdb;pdb.set_trace()
     # ======================================================================== 
     #                                
-    #                                   Page 3
-    #                 Cross Correlation, phase velocity determination,
-    #                       Estimation of backazimuth figures
+    #                                Page 3
+    #              Cross Correlation, phase velocity determination,
+    #                    Estimation of backazimuth figures
     #
     # ========================================================================= 
     print("\nPage 3 > Cross-correlation, Phase velocity...",end=" ")
 
+    X, Y = np.meshgrid(np.arange(0, sec * len(corrcoefs), sec), backas)
+
+    # subfigure 1
     plt.figure(figsize=(18, 9))
     plt.subplot2grid((4, 26), (0, 0), colspan=25)
     plt.plot(time, rt[0].data, color='r', label=r'Rotation rate')
@@ -2056,6 +2031,8 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
                           % (sec, cutoff, startev.date, startev.time))
     plt.grid(True)
     plt.legend(loc=7,shadow=True)
+
+    # subfigure 2
     plt.subplot2grid((4, 26), (1, 0), colspan=25)
     plt.scatter(np.arange(0, sec * len(phasv), sec), phasv,
                 c=corrcoefs, vmin=0.75, vmax=1, s=35,
@@ -2073,6 +2050,7 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
                             ticks=[0.75, 0.8, 0.85, 0.9, 0.95, 1.0])
     cb1.set_label(r'X-corr. coeff.', fontweight='bold')
 
+    # subfigure 3
     plt.subplot2grid((4, 26), (2, 0), colspan=25)
     plt.plot(np.arange(0, sec * len(corrcoefs), sec), max_coefs_10deg, 'ro-', 
                                     label='Max. CC for est. BAz', linewidth=1)
@@ -2088,6 +2066,7 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
     plt.legend(loc=4, shadow=True)
     plt.grid(True)
 
+    # subfigure 4
     plt.subplot2grid((4, 26), (3, 0), colspan=25)
     teobaz = BAz * np.ones(len(corrcoefs) + 1)
     plt.pcolor(X, Y, corrbaz, cmap=plt.cm.RdYlGn_r, vmin=-1, vmax=1)
@@ -2115,6 +2094,8 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
                                                         orientation='vertical')
     cb1.set_label(r'X-corr. coeff.', fontweight='bold')
     cb1.set_ticks([-1.0,-0.75,-0.5,-0.25,0.0,0.25,0.5,0.75,1.0])
+
+    # ============================= Save Figure =============================
     
     plt.savefig(
         os.path.join(folder_name,tag_name + '_{}_page_3.png'.format(station)))
@@ -2188,6 +2169,9 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
     #               Cross correlations for P-Coda time window
     #
     # ========================================================================= 
+
+    # P-coda limits
+    xlim1 = rt[0].stats.delta * len(rt[0].data) 
 
     print("\nPage 4 > P-Coda Waveform Comparison...",end=" ")
     plt.figure(figsize=(18, 9))
@@ -2453,83 +2437,81 @@ if __name__ == '__main__':
     bars = '='*79
     error_list = []
     for event in cat:
-        tag_name, folder_name, check_folder_exists = generate_tags(event)
-        plot_waveform_comp(event, station, link, mode, folder_name, tag_name)
-        # try:
-            # tag_name, folder_name, check_folder_exists = generate_tags(event)
+        try:
+            tag_name, folder_name, check_folder_exists = generate_tags(event)
 
-            # # check if current event folder exists
-            # if check_folder_exists:
-            #     # check if event source is the same, assumes 0 or 1 files found
-            #     if (os.path.basename(check_folder_exists[0]) != 
-            #                                     os.path.basename(folder_name)):
-            #         print('This event was processed with another mode\n')
-            #         already_processed += 1
-            #         continue
+            # check if current event folder exists
+            if check_folder_exists:
+                # check if event source is the same, assumes 0 or 1 files found
+                if (os.path.basename(check_folder_exists[0]) != 
+                                                os.path.basename(folder_name)):
+                    print('This event was processed with another mode\n')
+                    already_processed += 1
+                    continue
 
-            #     # if new station, run waveform compare again
-            #     try:
-            #         filename_json = os.path.join(folder_name,tag_name + '.json')
-            #         data = json.load(open(filename_json))
-            #         if data['station_information_{}'.format(station)]:
-            #             print("This event was already processed\n")
-            #             already_processed += 1
-            #         else:
-            #             try:
-            #                 plot_waveform_comp(event, station, link, mode,
-            #                                             folder_name, tag_name)
-            #                 success_counter += 1
+                # if new station, run waveform compare again
+                try:
+                    filename_json = os.path.join(folder_name,tag_name + '.json')
+                    data = json.load(open(filename_json))
+                    if data['station_information_{}'.format(station)]:
+                        print("This event was already processed\n")
+                        already_processed += 1
+                    else:
+                        try:
+                            plot_waveform_comp(event, station, link, mode,
+                                                        folder_name, tag_name)
+                            success_counter += 1
 
-            #             # if any error, remove folder, continue
-            #             except Exception as e:
-            #                 fail_counter += 1
-            #                 print(e)
-            #                 print("Removing incomplete folder...\n")
-            #                 error_list.append(tag_name)
-            #                 shutil.rmtree(folder_name)
+                        # if any error, remove folder, continue
+                        except Exception as e:
+                            fail_counter += 1
+                            print(e)
+                            print("Removing incomplete folder...\n")
+                            error_list.append(tag_name)
+                            shutil.rmtree(folder_name)
 
-            #             # if keyboard interrupt, remove folder, quit
-            #             except KeyboardInterrupt:
-            #                 print("Removing incomplete folder...\n")
-            #                 shutil.rmtree(folder_name)
-            #                 sys.exit()
+                        # if keyboard interrupt, remove folder, quit
+                        except KeyboardInterrupt:
+                            print("Removing incomplete folder...\n")
+                            shutil.rmtree(folder_name)
+                            sys.exit()
 
-            #     # if json not found, folder is incomplete, continue
-            #     except FileNotFoundError:
-            #         fail_counter += 1 
-            #         error_list.append(tag_name)
-            #         print("Incomplete folder found\n")
+                # if json not found, folder is incomplete, continue
+                except FileNotFoundError:
+                    fail_counter += 1 
+                    error_list.append(tag_name)
+                    print("Incomplete folder found\n")
 
             
-            # # event encountered for the first time, create folder, xml, process
-            # elif not check_folder_exists:  
-            #     os.makedirs(str(folder_name))
+            # event encountered for the first time, create folder, xml, process
+            elif not check_folder_exists:  
+                os.makedirs(str(folder_name))
                 
-            #     # run processing function
-            #     try:
-            #         plot_waveform_comp(event, station, link, mode,
-            #                                             folder_name, tag_name)
-            #         success_counter += 1
+                # run processing function
+                try:
+                    plot_waveform_comp(event, station, link, mode,
+                                                        folder_name, tag_name)
+                    success_counter += 1
                 
-            #     # if any error, remove folder, continue
-            #     except Exception as e:
-            #         fail_counter += 1
-            #         print(e)
-            #         print("Removing incomplete folder...\n")
-            #         error_list.append(tag_name)
-            #         shutil.rmtree(folder_name)
+                # if any error, remove folder, continue
+                except Exception as e:
+                    fail_counter += 1
+                    print(e)
+                    print("Removing incomplete folder...\n")
+                    error_list.append(tag_name)
+                    shutil.rmtree(folder_name)
                
-            #     # if keyboard interrupt, remove folder, quit
-            #     except KeyboardInterrupt:
-            #         fail_counter += 1
-            #         print("Removing incomplete folder...\n")
-            #         shutil.rmtree(folder_name)
-                    # sys.exit()
+                # if keyboard interrupt, remove folder, quit
+                except KeyboardInterrupt:
+                    fail_counter += 1
+                    print("Removing incomplete folder...\n")
+                    shutil.rmtree(folder_name)
+                    sys.exit()
 
-        # # if error creating tags, continue
-        # except Exception as e:
-        #     fail_counter += 1
-        #     print("Error in folder/tag name creation; ",e)
+        # if error creating tags, continue
+        except Exception as e:
+            fail_counter += 1
+            print("Error in folder/tag name creation; ",e)
 
     # print end message
     print('{}\n'.format('_'*79))
