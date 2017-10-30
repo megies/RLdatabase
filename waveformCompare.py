@@ -72,6 +72,7 @@ from xml.dom.minidom import parseString
 
 import numpy as np
 import matplotlib as mpl
+from pprint import pprint
 mpl.use('Agg')
 from obspy.core import read
 import matplotlib.pylab as plt
@@ -631,7 +632,7 @@ def filter_and_rotate(ac, rt, baz, rt_pcoda, ac_pcoda, cutoff, cutoff_pc,
     :return cop_rt: Highpass filtered rotational trace (rt).
     """
 
-    # set the list of frequencies for to bandpass filter for
+    # set the list of frequencies for bandpass filters
     freq_list = [0.01, 0.02, 0.04, 0.1, 0.2, 0.3, 0.4, 0.6, 1.0]
     number_of_bands = len(freq_list) - 1
     
@@ -639,15 +640,17 @@ def filter_and_rotate(ac, rt, baz, rt_pcoda, ac_pcoda, cutoff, cutoff_pc,
     ac_pcoda_coarse = ac.copy()
     rt_pcoda_coarse = rt.copy()
     rt_bands = [rt.copy() for _ in range(number_of_bands)]
-    rotate_bands = [ac.copy() for _ in range(number_of_bands)]
+    trv_bands = [ac.copy() for _ in range(number_of_bands)]
 
     # filter streams high and low
     ac.filter('lowpass', freq=cutoff, corners=2, zerophase=True)
     rt.filter('lowpass', freq=cutoff, corners=2, zerophase=True)
     ac.filter('highpass', freq=0.005, corners=2, zerophase=True)
     rt.filter('highpass', freq=0.005, corners=2, zerophase=True)
-    ac_pcoda_coarse.filter('highpass', freq=cutoff_pc, corners=2, zerophase=True)
-    rt_pcoda_coarse.filter('highpass', freq=cutoff_pc, corners=2, zerophase=True)
+    ac_pcoda_coarse.filter(
+                        'highpass', freq=cutoff_pc, corners=2, zerophase=True)
+    rt_pcoda_coarse.filter(
+                        'highpass', freq=cutoff_pc, corners=2, zerophase=True)
 
     # filter out secondary microseisms (5-12s) for non-local events
     if is_local == "non-local":    
@@ -665,29 +668,27 @@ def filter_and_rotate(ac, rt, baz, rt_pcoda, ac_pcoda, cutoff, cutoff_pc,
     pcoda_rotate.rotate(method = 'NE->RT')
     pcoda_rotate_coarse.rotate(method = 'NE->RT')
     
-    # for varying frequency bands, rotate to BAz, filter both RT and Rotate 
+    # for varying frequency bands, rotate to TRansVerse component, filter 
     for I in range(number_of_bands):
-        rotate_bands[I].rotate(method='NE->RT')
-
-        for band_select in [rt_bands[I],rotate_bands[I]]:
+        trv_bands[I] = trv_bands[I].rotate(method='NE->RT').select(
+                                                                component='T')
+        for band_select in [rt_bands[I],trv_bands[I]]:
             band_select[0].filter(type = 'bandpass',
                                 freqmin = freq_list[I],
                                 freqmax = freq_list[I+1],
                                 corners = 3,
                                 zerophase = True)
 
-    # Filter Pcoda for BAz analysis
+
+
+    # Filter Pcoda specific traces (finer sampling) for BAz analysis
     filt_rt_pcoda = rt_pcoda.copy()
-    filt_ac_pcoda = ac_pcoda.copy()
-    filt_rotate = filt_ac_pcoda.copy()
+    filt_rotate = ac_pcoda.copy()
     filt_rt_pcoda.filter('highpass', freq=cutoff_pc, corners=2, zerophase=True)
-    filt_ac_pcoda.filter('highpass', freq=cutoff_pc, corners=2, zerophase=True)
-    filt_rotate.filter('highpass', freq=cutoff_pc, corners=2, zerophase=True)
     filt_rotate.rotate(method = 'NE->RT')
 
-
-    return rt_bands, rotate_bands, rotate, rt_pcoda_coarse, pcoda_rotate_coarse, \
-            filt_rt_pcoda, filt_ac_pcoda, filt_rotate 
+    return rt_bands, trv_bands, rotate, rt_pcoda_coarse, \
+            pcoda_rotate_coarse, filt_rt_pcoda, filt_rotate 
 
 
 
@@ -892,7 +893,7 @@ def get_corrcoefs(streamA, streamB, sec, station):
     for i in range(0, len(streamA[0].data) // strA_TW):
         coeffs = correlate(a = streamA[0].data[i*strA_TW:(i+1)*strA_TW],
                            b = streamB[0].data[i*strB_TW:(i+1)*strB_TW], 
-                           shift=0)
+                           shift = 0)
 
         corrcoefs.append(coeffs[0])
 
@@ -974,7 +975,7 @@ def baz_analysis(rt, ac, sec, station):
     return corrbaz_list, maxcorr_list, backas, coefs_list
 
 
-def estimate_baz(rt, trv_acc, start_sw, end_sw, station):
+def estimate_baz(rt, ac, start_sw, end_sw, station):
     """
     Calculates the sum of all correlation coefficients above a certain
     threshold (0.9) within S-waves and surface waves for each backazimuth.
@@ -998,30 +999,33 @@ def estimate_baz(rt, trv_acc, start_sw, end_sw, station):
 
     # set integer sampling rates
     rt_SR = int(rt[0].stats.sampling_rate)
-    trv_SR = int(trv_acc[0].stats.sampling_rate)
+    ac_SR = int(ac[0].stats.sampling_rate)
     
     # time window in samples
     sec_internal = 30
     rt_TW = sec_internal * rt_SR
-    trv_TW = sec_internal * trv_SR
+    ac_TW = sec_internal * ac_SR
 
     # sample number of surface wave start/end
     start_sample = start_sw * rt_SR
-    end_sample = end_sw * trv_SR
+    end_sample = end_sw * ac_SR
 
     # cut streams at surface waves
     rt_cut = rt[0].data[start_sample:end_sample]
-    trv_cut = trv_acc[0].data[start_sample:end_sample]
+    acN_cut = ac.select(component='N')[0].data[start_sample:end_sample]
+    acE_cut = ac.select(component='E')[0].data[start_sample:end_sample]
+
 
     step = 1
     baz_list = np.linspace(0, int(360 - step), int(360 / step)) # BAz array
     
     # iterate over all BAz values, correlate in time windows
     corr_list = []
-    for i in range(len(baz_list)):
+    for BAZ in baz_list:
         for j in range(len(rt_cut) // rt_TW):
+            rad_cut,trv_cut = rotate_ne_rt(n = acN_cut, e = acE_cut, ba = BAZ)
             corr = correlate(a = rt_cut[j*rt_TW:(j+1)*rt_TW],
-                             b = trv_cut[j*trv_TW:(j+1)*trv_TW],
+                             b = trv_cut[j*ac_TW:(j+1)*ac_TW],
                              shift = 0)  
 
             corr_list.append(corr[0])
@@ -1029,10 +1033,10 @@ def estimate_baz(rt, trv_acc, start_sw, end_sw, station):
     corr_list = np.asarray(corr_list)
     corr_list = corr_list.reshape(
                         len(baz_list),int(round(len(corr_list)/len(baz_list))))
-    
+
     # iterate over correlations, choose those > 0.9
     corrsum_list = []
-    for k in range(len(corr_list[:,0])):
+    for k in range(len(baz_list)):
         bazsum = []
         for l in range(len(corr_list[0, :])):
             if corr_list[k, l] >= 0.9:
@@ -1044,12 +1048,10 @@ def estimate_baz(rt, trv_acc, start_sw, end_sw, station):
         bazsum = sum(bazsum)
         corrsum_list.append(bazsum)
 
-    # best backazimuth estimated, and maximum correlations for that BAz
-    corrsum_list = np.asarray(corrsum_list)
-    best_ebaz = baz_list[corrsum_list.argmax()] 
+    # Determine estimated Backazimuth
+    best_ebaz = baz_list[np.asarray(corrsum_list).argmax()] 
     max_ebaz_xcoef = np.max(corr_list[int(best_ebaz)]) 
 
-    # Determine estimated Backazimuth
     if max(corrsum_list) == 0.0:
         EBA = np.nan
     else:
@@ -1178,20 +1180,27 @@ def store_info_json(rt, ac, trv_acc, corrcoefs, dist_baz, arriv_p, EBA, station,
     :type tag_name: string
     :param tag_name: Handle of the event.
     """
+    # set the global 'round to decimal point' value
+    rnd = 6
 
+    # parse out parameters for json file
     orig = event.preferred_origin() or event.origins[0] # Event origin
     catalog = orig.creation_info.author or orig.creation_info.agency_id
     magnitude = event.preferred_magnitude() or event.magnitudes[0] # Mag info.
 
-    PAT = max(trv_acc[0].data)  # Peak transverse acceleration [nm/s]
-    PRZ = max(rt[0].data)  # Peak vertical rotation rate [nrad/s]
-    PCC = max(corrcoefs)  # Peak correlation coefficient
-    MCC = min(corrcoefs) # Minimum correlation coefficient
-    TBA = dist_baz[2]  # Theoretical backazimuth [°]
-    DS_KM = 0.001 * dist_baz[0] # Epicentral Distance [km]
-    DS_DEG =  DS_KM / 111.11 # Epicentral Distance [°]
-    SNT = sn_ratio(ac[0].data, arriv_p, ac[0].stats.sampling_rate) 
-    SNR = sn_ratio(rt[0].data, arriv_p, rt[0].stats.sampling_rate) 
+    PAT = round(max(trv_acc[0].data), rnd)  # Peak transverse acc. [nm/s]
+    PRZ = round(max(rt[0].data), rnd)  # Peak vertical rotation rate [nrad/s]
+    PCC = round(max(corrcoefs), rnd)  # Peak correlation coefficient
+    MCC = round(min(corrcoefs), rnd) # Minimum correlation coefficient
+    TBA = round(dist_baz[2], rnd) # Theoretical backazimuth [°]
+    MXE = round(max_ebaz_xcoef, rnd) # Max correlation for Estimated BAz
+    DS_KM = round(0.001 * dist_baz[0], rnd) # Epicentral Distance [km]
+    DS_DEG = round(DS_KM / 111.11, rnd) # Epicentral Distance [°]
+    SNT = round(sn_ratio(ac[0].data, arriv_p, ac[0].stats.sampling_rate), rnd) 
+    SNR = round(sn_ratio(rt[0].data, arriv_p, rt[0].stats.sampling_rate), rnd)
+
+    phasv_means = [round(_,rnd) for _ in phasv_means] 
+    phasv_stds = [round(_,rnd) for _ in phasv_stds] 
 
     # common event dictionary
     dic_event = OrderedDict([
@@ -1208,7 +1217,7 @@ def store_info_json(rt, ac, trv_acc, corrcoefs, dist_baz, arriv_p, EBA, station,
                 ('depth_unit', 'km')
                 ])
 
-    # individual station dictionary w/ rotational parameters
+    # individual station dictionary w/ rotational parameters and velocities
     dic_station = OrderedDict([
             ('station_information_{}'.format(station), 
                 OrderedDict([
@@ -1242,13 +1251,13 @@ def store_info_json(rt, ac, trv_acc, corrcoefs, dist_baz, arriv_p, EBA, station,
                     ('theoretical_backazimuth', TBA),
                     ('estimated_backazimuth', EBA),
                     ('backazimuth_unit', 'degrees'),
-                    ('max_xcoef_for_estimated_backazimuth', max_ebaz_xcoef),
+                    ('peak_correlation_coefficient', PCC),
+                    ('minimum_correlation_coefficient', MCC),
+                    ('max_xcoef_for_estimated_backazimuth', MXE),
                     ('peak_vertical_rotation_rate', PRZ),
                     ('peak_vertical_rotation_rate_unit', 'nrad/s'),
                     ('peak_transverse_acceleration', PAT),
                     ('peak_transverse_acceleration_unit', 'nm/s^2'),
-                    ('peak_correlation_coefficient', PCC),
-                    ('minimum_correlation_coefficient', MCC),
                     ('vertical_rotation_rate_SNR', SNR),
                     ('transverse_acceleration_SNR', SNT),
                     ])
@@ -1483,8 +1492,8 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
             plt.subplot2grid((4, 9), (0, 4), colspan=5, rowspan=4)
 
             # If the great circle between the station and event is crossing the
-            # 180° meridian in the pacific and the stations are far apart the map
-            # has to be re-centered, otherwise wrong side of globe.
+            # 180° meridian in the pacific and the stations are far apart the 
+            # map has to be re-centered, otherwise wrong side of globe.
             if abs(station_lon - event_lon) > 180:
                 lon0 = 180 + (station_lon + event_lon) / 2
             else:
@@ -1757,8 +1766,8 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
 
     print("Filtering and rotating traces...")
     # filter raw data, rotate some to theoretical backazimuth
-    rt_bands, rotate_bands, rotate, rt_pcoda_coarse, pcoda_rotate_coarse, \
-    filt_rt_pcoda, filt_ac_pcoda, filt_rotate = filter_and_rotate(ac, rt, BAz, 
+    rt_bands, trv_bands, rotate, rt_pcoda_coarse, pcoda_rotate_coarse, \
+    filt_rt_pcoda, filt_rotate = filter_and_rotate(ac, rt, BAz, 
                 rt_pcoda, ac_pcoda, cutoff, cutoff_pc, station, is_local(DS))
 
     print("Getting theoretical arrival times...")
@@ -1959,9 +1968,8 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
     seconds_list = [200, 100, 50, 20, 12, 10, 8, 6]
 
     for i in range(len(rt_bands)):
-        tr_acc_band = rotate_bands[i].select(component='T')
         corrcoefs_tmp, thresh_tmp = get_corrcoefs(streamA = rt_bands[i],
-                                                  streamB = tr_acc_band,
+                                                  streamB = trv_bands[i],
                                                   sec = seconds_list[i], 
                                                   station = station)
         corrcoefs_bands.append(corrcoefs_tmp)
@@ -1975,7 +1983,7 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
     # estimate backazimuth and correlations for given BAz
     print("Estimating best backazimuth value...")
     corrsum, baz_list, max_ebaz_xcoef, EBA = estimate_baz(
-                                        rt, trv_acc, min_sw, max_lwf, station)
+                                        rt, ac, min_sw, max_lwf, station)
 
     print("Calculating phase velocities...")
 
@@ -1987,8 +1995,7 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
     # calculate phase velocities for different frequency bands, 1-8
     phasv_bands,phasv_means,phasv_stds = [],[],[]
     for i in range(len(rt_bands)):
-        trv_tmp = rotate_bands[i].select(component='T')
-        phasv_tmp = get_phase_vel(rt_bands[i], trv_tmp, seconds_list[i],
+        phasv_tmp = get_phase_vel(rt_bands[i], trv_bands[i], seconds_list[i],
                                 corrcoefs_bands[i], surf_start, band_check=True)
         
         # filter out NaNs and append to list
@@ -2003,7 +2010,6 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
             phasv_means.append(np.NaN)
             phasv_stds.append(np.NaN)
 
-    import pdb;pdb.set_trace()
     # ======================================================================== 
     #                                
     #                                Page 3
@@ -2015,7 +2021,7 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
 
     X, Y = np.meshgrid(np.arange(0, sec * len(corrcoefs), sec), backas)
 
-    # subfigure 1
+    # subplot 1
     plt.figure(figsize=(18, 9))
     plt.subplot2grid((4, 26), (0, 0), colspan=25)
     plt.plot(time, rt[0].data, color='r', label=r'Rotation rate')
@@ -2032,7 +2038,7 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
     plt.grid(True)
     plt.legend(loc=7,shadow=True)
 
-    # subfigure 2
+    # subplot 2
     plt.subplot2grid((4, 26), (1, 0), colspan=25)
     plt.scatter(np.arange(0, sec * len(phasv), sec), phasv,
                 c=corrcoefs, vmin=0.75, vmax=1, s=35,
@@ -2050,7 +2056,7 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
                             ticks=[0.75, 0.8, 0.85, 0.9, 0.95, 1.0])
     cb1.set_label(r'X-corr. coeff.', fontweight='bold')
 
-    # subfigure 3
+    # subplot 3
     plt.subplot2grid((4, 26), (2, 0), colspan=25)
     plt.plot(np.arange(0, sec * len(corrcoefs), sec), max_coefs_10deg, 'ro-', 
                                     label='Max. CC for est. BAz', linewidth=1)
@@ -2066,7 +2072,7 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
     plt.legend(loc=4, shadow=True)
     plt.grid(True)
 
-    # subfigure 4
+    # subplot 4
     plt.subplot2grid((4, 26), (3, 0), colspan=25)
     teobaz = BAz * np.ones(len(corrcoefs) + 1)
     plt.pcolor(X, Y, corrbaz, cmap=plt.cm.RdYlGn_r, vmin=-1, vmax=1)
@@ -2075,7 +2081,8 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
     plt.text(1000, BAz, str(BAz)[0:5] + r'°',
              bbox={'facecolor': 'black', 'alpha': 0.8}, color='r')
 
-    if EBA == baz_list[np.asarray(corrsum).argmax()]:
+    # only plot estimated backazimuth if a value is given
+    if not np.isnan(EBA):
         obsbaz = EBA * np.ones(len(corrcoefs) + 1)
         plt.text(400, EBA, str(EBA)[0:5] + r'°',
                  bbox={'facecolor': 'black', 'alpha': 0.8}, color='y')
@@ -2111,7 +2118,7 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
     print("Analyzing rotations in the P-coda")
     
     # Zero-lag correlation coefficients
-    print("ZLCC...",end=" ")
+    print("Zero-Lag cross correlation...",end=" ")
 
     # integer sampling rates
     rt_pc_SR = int(filt_rt_pcoda[0].stats.sampling_rate)
@@ -2122,39 +2129,39 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
 
     # separate transverse and vertical components
     trv_acc_pcoda = filt_rotate.select(component='T')
-    vrt_acc_pcoda = filt_rotate.select(component='Z')
+    acZ_pcoda = ac_pcoda.select(component='Z')
 
     # cut pcoda at correct time window and taper cuts
     rt_pcoda_cut = filt_rt_pcoda.copy()
     trv_pcoda_cut = trv_acc_pcoda.copy()
+
     rt_pcoda_cut[0].data = filt_rt_pcoda[0].data[0:lwi_average * rt_pc_SR]
     trv_pcoda_cut[0].data = trv_pcoda_cut[0].data[0:lwi_average * trv_pc_SR]
     for traces in [rt_pcoda_cut,trv_pcoda_cut]:
         traces.taper(max_percentage=0.05)
 
     # find correlations
-    corrcoefs_p, thres_p = get_corrcoefs(rt_pcoda_cut, trv_pcoda_cut, sec_p,
-                                                                        station)
+    corrcoefs_p, thres_p = get_corrcoefs(
+                                    rt_pcoda_cut, trv_pcoda_cut, sec_p, station)
 
-    print("BAz...")
+    print("Backzimuth...")
 
     # surface wave start sample
     max_lwi_ac = trv_pc_SR * max_lwi
 
     # analyze backazimuth
-    corrbaz_p, maxcorr_p, backas, max_coefs_10deg_p = baz_analysis(
+    corrbaz_p, maxcorr_p, backas_p, max_coefs_10deg_p = baz_analysis(
                                     rt_pcoda_cut, trv_pcoda_cut, sec_p, station)
-
-    Xp, Yp = np.meshgrid(np.arange(0, sec_p * len(corrcoefs_p), sec_p), backas)
 
     # set up arrays for plotting
     time_p = rt_pcoda_cut[0].stats.delta * np.arange(0, len(rt_pcoda[0].data))
-    fact1_p = 2 * max(rt_pcoda_cut[0].data[0:max_lwi_ac])
+    fact1_p = 2 * max(rt_pcoda[0].data[0:max_lwi_ac])
 
-    # calculate phase velocity for scaling, from full waveform sections 
-    # filtered with the pcoda highpass cutoff
-    c1_p = .5 * (max(abs(pc_trv_acc[0].data[0:max_lwi_ac])) /
+
+    c1_p = .5 * (max(abs(trv_acc_pcoda[0].data[0:max_lwi_ac])) /
                  max(abs(rt_pcoda[0].data[0:max_lwi_ac])))
+
+    # * as of right now c1_p is correct without highpass filtering, why?
 
     maxcorr_p_list = []
     for m in range(0, len(maxcorr_p)):
@@ -2165,29 +2172,36 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
 
     # ======================================================================== 
     #                                
-    #                                   Page 4
+    #                                Page 4
     #               Cross correlations for P-Coda time window
     #
     # ========================================================================= 
 
     # P-coda limits
     xlim1 = rt[0].stats.delta * len(rt[0].data) 
+    Xp, Yp = np.meshgrid(np.arange(0,sec_p * len(corrcoefs_p), sec_p), backas_p)
 
     print("\nPage 4 > P-Coda Waveform Comparison...",end=" ")
+
+    import pdb;pdb.set_trace()
+    # subplot 1
     plt.figure(figsize=(18, 9))
     plt.subplot2grid((5, 26), (0, 0), colspan=25)
-    plt.plot(time_p, vrt_acc_pcoda[0].data, color='g')
+    plt.plot(time_p, acZ_pcoda[0].data, color='g')
     plt.ylabel(r'a$_\mathbf{Z}$ [nm/s$^2$]', fontweight='bold', fontsize=11)
     plt.ticklabel_format(axis='y', style='sci', scilimits=(-2,2))
     plt.xlim(0, (min_lwi + max_lwi) // 2)
-    plt.ylim(min(vrt_acc_pcoda[0].data[0:max_lwi_ac]),
-             max(vrt_acc_pcoda[0].data[0:max_lwi_ac]))
+    plt.ylim(min(acZ_pcoda[0].data[0:max_lwi_ac]),
+             max(acZ_pcoda[0].data[0:max_lwi_ac]))
     plt.title(r'$\dot{\mathbf{\Omega}}_\mathbf{z}$ and a$_\mathbf{T}$'
               'correlation in the P-coda in a %d seconds time window'
               ' (highpass, cutoff: 1 Hz). Event: %s %sZ' % 
                                             (sec_p, startev.date, startev.time))
     plt.axvline(x=min_pw, linewidth=1)
     plt.axvline(x=min_sw, linewidth=1)
+    plt.grid(True)
+
+    # subplot 2
     plt.subplot2grid((5, 26), (1, 0), colspan=25, rowspan=2)
 
     plt.plot(time_p, rt_pcoda[0].data, color='r', label=r'Rotation rate')
@@ -2213,13 +2227,15 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
     plt.grid(True)
     plt.legend(loc=6, shadow=True)
 
-
+    # subplot 3
     plt.subplot2grid((5, 26), (3, 0), colspan=25)
     plt.plot(np.arange(0, sec_p * len(corrcoefs_p), sec_p), corrcoefs_p, '.k')
     plt.ylabel(r'X-corr. coeff.', fontweight='bold')
     plt.xlim(0, (min_lwi + max_lwi) // 2)
     plt.ylim(0, 1)
     plt.grid(True)
+
+    # subplot 4
     plt.subplot2grid((5, 26), (4, 0), colspan=25)
     plt.pcolor(Xp, Yp, corrbaz_p, cmap=plt.cm.RdYlGn_r, vmin=-1, vmax=1)
     plt.plot(np.arange(0, sec_p * len(corrcoefs_p), sec_p), 
@@ -2340,7 +2356,8 @@ if __name__ == '__main__':
     parser.add_argument('--max_magnitude', help='Maximum magnitude for \
         events (default is 10).', type=float or int, default=10.0)
     parser.add_argument('--min_depth', help='Minimum depth for events in km \
-        (default is 0 km). Positive down for IRIS.', type=float or int, default=0.0)
+        (default is 0 km). Positive down for IRIS.', 
+                                            type=float or int, default=0.0)
     parser.add_argument('--max_depth', help='Maximum depth for events in km \
         (default is 1000 km for IRIS).', type=float or int, default=1000.0)
     parser.add_argument('--min_latitude', help='Minimum latitude for events.\
