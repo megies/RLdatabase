@@ -175,7 +175,7 @@ def download_data(origin_time, instrument_id, source):
     st.trim(starttime=origin_time-180, endtime=origin_time+3*3600)
     print("\tDownload of {!s} {!s} data successful".format(
               st[0].stats.station, st[0].stats.channel))
-    
+
     return st, data_source
 
 
@@ -301,56 +301,41 @@ def is_local(ds_in_km):
     far:  10° <= x          or  1111.1 km <= x
     
     :type ds_in_km: float
-    :param ds_in_km: Event-station distance in km
+    :param ds_in_km: Event-station distance in m
     :rtype: str
     :return: Self-explaining string for event distance.
     """
     # approximation of distance in degrees
-    distance_in_deg = 1E-3 * ds_in_km / 111.11
+    distance_in_deg = ds_in_km / 111.11
 
     if distance_in_deg < 10.0:
         if distance_in_deg < 3.0:
-            is_local = 'close'
+            is_local = 'CLOSE'
         else:
-            is_local = 'local'
+            is_local = 'LOCAL'
     else:
-        is_local = 'far'
+        is_local = 'FAR'
 
     return is_local
 
 
-def get_moment_tensor(link):
+def get_moment_tensor(event):
 
     """
-    Extract moment tensor and magnitude for an event if an IRIS-xml file
-    is given by a URL (link).
+    Extract moment tensor from event class if mode GCMT, to plot beachballs
 
-    :type link: str
-    :param link: URL to IRIS-xml
+    :type event: :class: `~obspy.core.event.event.Event`
+    :param event: Event information container
     :rtype moment_tensor: list of floats
     :return moment_tensor: List of the six independent MT components
-    :rtype mt_magnitude: float
-    :return mt_magnitude: Moment magnitude (Mw) of the event.
-    :rtype mt_region: str
-    :return mt_region: Region given in XML file
     """
-    file = urlopen(link)
-    data = file.read()
-    file.close()
-
-    dom = parseString(data)
-    xmlTag = dom.getElementsByTagName('value')
-    xmlTag2 = dom.getElementsByTagName('text')
-    
-    mt_magnitude = float(xmlTag[19].firstChild.nodeValue)
-    mt_region = str(xmlTag2[0].firstChild.nodeValue)
+    foc_mech = event.preferred_focal_mechanism() or event.focal_mechanisms[0]
+    tensor = foc_mech.moment_tensor.tensor
     moment_tensor = []
+    for component in ['m_rr','m_tt','m_pp','m_rt','m_rp','m_tp']:
+        moment_tensor.append(tensor[component])
 
-    for i in range(1, 7):
-        value = float(xmlTag[i].firstChild.nodeValue)
-        moment_tensor.append(value)
-
-    return moment_tensor, mt_magnitude, mt_region
+    return moment_tensor
 
 
 def resample(is_local, rt, ac):
@@ -379,7 +364,7 @@ def resample(is_local, rt, ac):
     """
 
     cutoff_pc = 0.5 # cutoff for pcoda lowpass
-    if is_local == 'far':
+    if is_local == 'FAR':
         rt_pcoda = rt.copy()
         ac_pcoda = ac.copy()
         rt_pcoda.decimate(factor=2)
@@ -389,7 +374,7 @@ def resample(is_local, rt, ac):
         sec = 120 # length of time window in seconds
         sec_p = 5 # pcoda time window in seconds
         cutoff = 1.0 # cut-off freq for full-trace lowpass
-    elif is_local == 'local':
+    elif is_local == 'LOCAL':
         for trr in (rt + ac):
             trr.data = trr.data[0: int(1800 * rt[0].stats.sampling_rate)]
         rt_pcoda = rt.copy()
@@ -399,7 +384,7 @@ def resample(is_local, rt, ac):
         sec = 5 
         sec_p = 2
         cutoff = 2.0  
-    elif is_local == 'close':
+    elif is_local == 'CLOSE':
         for trr in (rt + ac):
             trr.data = trr.data[0: int(1800 * rt[0].stats.sampling_rate)]
         rt_pcoda = rt.copy()
@@ -670,8 +655,8 @@ def ps_arrival_times(ds_in_km, depth, init_sec):
     epicentral distance in degrees, the depth in km and the initial time in
     seconds (starttime_of_the_event - data_starttime)
 
-    :type distance: float
-    :param distance: Event-station distance, in km.
+    :type ds_in_km: float
+    :param ds_in_km: Event-station distance, in km.
     :type depth: float
     :param depth: Hypocenter depth in km.
     :type init_sec: float
@@ -684,7 +669,7 @@ def ps_arrival_times(ds_in_km, depth, init_sec):
     # use taup to get the theoretical arrival times for P & S
     TauPy_model = TauPyModel('iasp91')
     tt = TauPy_model.get_travel_times(
-                                distance_in_degree=0.001 * ds_in_km / 111.11, 
+                                distance_in_degree=ds_in_km / 111.11, 
                                 source_depth_in_km=depth)
     
     times_p,times_s = [],[]
@@ -717,7 +702,7 @@ def time_windows(dist_in_km, arriv_p, arriv_s, init_sec, is_local):
     All values set to integers, as they are used for slice indexing
 
     :type dist_in_km: float
-    :param dist_in_km: Event station distance in km
+    :param dist_in_km: Event station distance in m
     :type arriv_p: float
     :param arriv_p: Arrival time of the first P-wave.
     :type arriv_s: float
@@ -737,16 +722,16 @@ def time_windows(dist_in_km, arriv_p, arriv_s, init_sec, is_local):
     :return max_lwf: End time for latter surface-waves window.
     """
 
-    if is_local == 'far':
+    if is_local == 'FAR':
         min_pw = int(arriv_p)
         max_pw = int(min_pw + (arriv_s - arriv_p) // 4)
         min_sw = int(round(arriv_s - 0.001 * (arriv_s - arriv_p)))
         max_sw = int(arriv_s + 150)
         min_lwi = int(round(surf_tts(dist_in_km, init_sec) - 20))
-        max_lwi = int(min_lwi + round((dist_in_km/1E6) * 50)) # 50sec/1000 km. 
+        max_lwi = int(min_lwi + round((dist_in_km/1E3) * 50)) # 50sec/1000 km. 
         min_lwf = int(max_lwi)
-        max_lwf = int(min_lwf + round((dist_in_km/1E6) * 60)) # 60sec/1000 km.
-    elif is_local == 'local':
+        max_lwf = int(min_lwf + round((dist_in_km/1E3) * 60)) # 60sec/1000 km.
+    elif is_local == 'LOCAL':
         min_pw = int(arriv_p)
         max_pw = int(min_pw + 20)
         min_sw = int(arriv_s - 5)
@@ -755,7 +740,7 @@ def time_windows(dist_in_km, arriv_p, arriv_s, init_sec, is_local):
         max_lwi = int(min_lwi + 50)
         min_lwf = int(max_lwi)
         max_lwf = int(min_lwf + 80)
-    elif is_local == 'close':
+    elif is_local == 'CLOSE':
         min_pw = int(arriv_p)
         max_pw = int(min_pw + 7)
         min_sw = int(arriv_s)
@@ -765,16 +750,6 @@ def time_windows(dist_in_km, arriv_p, arriv_s, init_sec, is_local):
         min_lwf = int(max_lwi)
         max_lwf = int(min_lwf + 80)
 
-    # I wrote a dictionary but it's not so useful... :/
-
-    # arrival_dic = {'pwave_start': min_pw,
-    #             'pwave_end': max_pw,
-    #             'swave_start': min_sw,
-    #             'swave_end': max_sw,
-    #             'initial_surface_start': min_lwi,
-    #             'initial_surface_end': max_lwi,
-    #             'latter_surface_start': min_lwf,
-    #             'latter_surface_end': max_lwf}
 
     return min_pw, max_pw, min_sw, max_sw, min_lwi, max_lwi, min_lwf, max_lwf
 
@@ -786,9 +761,8 @@ def surf_tts(ds_in_km, start_time):
     travel times model to estimate a curve of travel times for surface waves.
     Returns the arrival time of the surface waves
 
-    :type distance: float
-    :param distance: Epicentral distance in degrees between earthquake source
-        and receiver station.
+    :type ds_in_km: float
+    :param ds_in_km: Epicentral distance in km
     :type start_time: float
     :param start_time: Start time of the event.
     :rtype arrival: float
@@ -805,7 +779,7 @@ def surf_tts(ds_in_km, start_time):
     surftts = mval * np.arange(0., 180.1, 0.01)
     difer = []
     for i4 in range(0, len(surftts)):
-        dife_r = abs(0.001 * ds_in_km / 111.11 - np.arange(0., 180.1, 0.01)
+        dife_r = abs(ds_in_km / 111.11 - np.arange(0., 180.1, 0.01)
                      [i4])
         difer.append(dife_r)
     # love wave arrival: event time + surftts for closest degree??
@@ -1369,7 +1343,7 @@ def store_info_xml(event,folder_name,tag_name,station):
                             r"http://www.rotational-seismology.org"})
 
 
-def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
+def plot_waveform_comp(event, station, mode, folder_name, tag_name):
 
     """
     Main processing script, calls all other functions defined above.
@@ -1400,20 +1374,20 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
         event_info_data(event, station, polarity, instrument)
     
     # parse out event and station location information
-    DS = dist_baz[0]
+    ds_in_km = dist_baz[0] * 1E-3
     BAz = dist_baz[2]
     station_lat = rt[0].stats.coordinates.latitude
     station_lon = rt[0].stats.coordinates.longitude
 
-    # try to get region information
-    try:
-        region = event.event_descriptions[0]['text']
-        reg = True
-    except:
-        reg = False
-    
-    if link != 'blank':
-        moment_tensor, mt_magnitude, mt_region = get_moment_tensor(link)
+    # parse out information for title
+    flinn_engdahl_title = event.event_descriptions[0]['text'].title()
+    mag = event.preferred_magnitude() or event.magnitudes[0] 
+
+    # try to get moment tensor information
+    if event.preferred_focal_mechanism():
+        moment_tensor = get_moment_tensor(event)
+    else:
+        moment_tensor = None
 
     # =========================================================================
     #                                   
@@ -1423,8 +1397,11 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
     # =========================================================================
     print("\nPage 1 > Title Card...", end=" ")
 
-    if is_local(DS) == 'far': 
-        if DS <= 13000000:
+    # ================================ Draw Maps===============================
+    if is_local(ds_in_km) == 'FAR': 
+        shift_text = 200000
+        event_size = 200
+        if ds_in_km <= 13000:
             plt.figure(figsize=(18, 9))
             plt.subplot2grid((4, 9), (0, 4), colspan=5, rowspan=4)
 
@@ -1435,7 +1412,7 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
                             resolution='l')
             map.drawmeridians(np.arange(0, 360, 30))
             map.drawparallels(np.arange(-90, 90, 30))
-        elif DS > 13000000:
+        elif ds_in_km > 13000:
             plt.figure(figsize=(18, 9))
             plt.subplot2grid((4, 9), (0, 4), colspan=5, rowspan=4)
 
@@ -1451,7 +1428,8 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
             map.drawmeridians(np.arange(0, 360, 30))
             map.drawparallels(np.arange(-90, 90, 30))
 
-    elif is_local(DS) == 'local':
+    elif is_local(ds_in_km) == 'LOCAL':
+        event_size = 300
         plt.figure(figsize=(18, 9))
         plt.subplot2grid((4, 9), (0, 4), colspan=5, rowspan=4)
 
@@ -1466,10 +1444,11 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
         map.drawmeridians(np.arange(0., 360., 5.), labels=[1, 0, 0, 1])
         map.drawstates(linewidth=0.25)
 
-    elif is_local(DS) == 'close':
+    elif is_local(ds_in_km) == 'CLOSE':
+        event_size = 300
         plt.figure(figsize=(26, 13))
-        plt.title('Event: %s %sZ\n \n ' %
-                (startev.date, startev.time), fontsize=24, fontweight='bold')
+        plt.title('{}T{}Z\n \n '.format(startev.date, startev.time), 
+                                                fontsize=24, fontweight='bold')
         plt.subplot2grid((4, 9), (0, 4), colspan=5, rowspan=4)
 
         # conic map plot
@@ -1490,165 +1469,80 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
     map.fillcontinents(color='coral', lake_color='lightblue')
     map.drawmapboundary(fill_color='lightblue')
 
-    if is_local(DS) == 'local' or is_local(DS) == 'close':
+    if is_local(ds_in_km) == 'LOCAL' or is_local(ds_in_km) == 'CLOSE':
         map.drawlsmask(land_color='coral', ocean_color='lightblue', lakes=True)
         map.drawcountries(linewidth=0.6)
    
     map.drawgreatcircle(event_lon, event_lat, station_lon, station_lat, 
                                                     linewidth=3, color='yellow')
-
+    
+    # =========================== Station/ Event ===============================
     if station == 'RLAS':
-        x, y = map(event_lon, event_lat)
-        statlon, statlat = map(station_lon, station_lat)
+        ev_x, ev_y = map(event_lon, event_lat)
+        sta_x, sta_y = map(station_lon, station_lat)
 
-        if is_local(DS) == 'far':
-            map.scatter(statlon, statlat, 200, color="b", marker="v",
-                                                     edgecolor="k", zorder=100)
-            plt.text(statlon + 200000, statlat, station, va="top",
-                                family="monospace", weight="bold", zorder=101,
-                                color='k', backgroundcolor='white')
-            map.scatter(x, y, 200, color="b", marker="*", edgecolor="k", 
-                                                                    zorder=100)
+        # station
+        map.scatter(sta_x, sta_y, 200, color='b', marker='v',
+                                        edgecolor='k', zorder=100)
+        plt.text(sta_x + shift_text, sta_y, station, va='top',
+                                                 family='monospace', 
+                                                 weight='bold', 
+                                                 zorder=101,
+                                                 color='k', 
+                                                 backgroundcolor='white')
+        # event as moment tensor or star 
+        # !!! doesn't plot MT for some reason - disregard for now
+        # if moment_tensor:
+        #     ax = plt.gca()
+        #     ax.axis('equal')
+        #     ax.axis('off')
+        #     b = beach(moment_tensor, xy=(ev_x,ev_y), facecolor='blue',
+        #                                 width=100, linewidth=1, alpha=1.0)
+        #     b.set_zorder(100)
+        #     ax.add_collection(b)
+        # else:
+        #     map.scatter(ev_x, ev_y, 200, color="b", marker="*", 
+        #                                         edgecolor="k", zorder=100)
 
-            # add beachballs for the event and station triangle, if mode == link
-            if mode == 'link':
-                plt.subplot2grid((4, 9), (1, 0), colspan=2)
-                plt.title(u'Event: %s \n %s \n \n' % (startev, mt_region),
-                                                    fontsize=20, weight='bold')
-                ax = plt.gca()
-                ax.axis('equal')
-                ax.axis('off')
-                b = beach(moment_tensor, xy=(0.5, 0.5), facecolor='blue',
-                                            width=0.5, linewidth=1, alpha=1.0)
-                b.set_zorder(200)
-                ax.add_collection(b)
+        # event
+        map.scatter(ev_x, ev_y, event_size, color="b", marker="*", 
+                                                edgecolor="k", zorder=100)
 
-                plt.subplot2grid((4, 9), (2, 0), colspan=2)
-                plt.title(u'\nMagnitude: %s \n\nDistance: %.2f [km], %.2f [°]'
-                          '\n\nDepth: %.2f [km]'
-                          % (str(event).split('\n')[0][57:64], 0.001 * DS,
-                             0.001 * DS / 111.11, depth), fontsize=18,
-                            fontweight='bold')
-                ax = plt.gca()
-                ax.axis('off')
+        # title large
+        plt.subplot2grid((4, 9), (1, 0), colspan=2)
+        plt.title(u'{}T{}Z\n'.format(startev.date, startev.time), 
+                                            fontsize=20, weight='bold')
+        ax = plt.gca()
+        ax.axis('equal')
+        ax.axis('off')
 
-                plt.subplot2grid((4, 9), (3, 0), colspan=2)
-                plt.title(u'Event Information: \n Global Centroid-Moment-Tensor'
-                          ' Catalog (GCMT)' 
-                          '\n\n Processing Date:\n'+str(UTCDateTime().date),
-                          fontsize=14)
-                ax = plt.gca()
-                ax.axis('off')
+        # sub-title
+        plt.subplot2grid((4, 9), (2, 0), colspan=2)
+        plt.title(u'\n\nRegion: {}'.format(flinn_engdahl_title) + 
+                '\n\nMagnitude: {} {}'.format(mag.mag,mag.magnitude_type) + 
+                '\n\nDistance: {} [km], {} [°]'.format(
+                                    round(ds_in_km,2), round(BAz,2)) + 
+                '\n\nDepth: {} [km]'.format(depth),
+                  fontsize=18, fontweight='bold')
 
-            else:
-                map.scatter(x, y, 200, color="b", marker="*", edgecolor="k",
-                            zorder=100)
+        ax = plt.gca()
+        ax.axis('off')
 
-                plt.subplot2grid((4, 9), (1, 0), colspan=2)
-                plt.title(u'Event: %s %sZ\n' % (startev.date, startev.time), 
-                                                    fontsize=20, weight='bold')
-                ax = plt.gca()
-                ax.axis('equal')
-                ax.axis('off')
+        plt.subplot2grid((4, 9), (3, 0), colspan=2)
+        plt.title(u'Event Information: \n Global Centroid-Moment-Tensor '
+                  'Catalog (GCMT) \n\n Processing Date:\n' + 
+                  str(UTCDateTime().date),
+                  fontsize=14)
+        ax = plt.gca()
+        ax.axis('off')
 
-                plt.subplot2grid((4, 9), (2, 0), colspan=2)
-                if reg==True:
-                    plt.title(u'\n\nRegion: %s \n\nMagnitude: %s \n\nDistance: %.2f [km], %.2f [°]\n\nDepth: %.2f [km]'
-                              % (region, str(event).split('\n')[0][57:64], 0.001 * DS,
-                                 0.001 * DS / 111.11, depth),
-                                fontsize=18, fontweight='bold')
-                else:
-                    plt.title(u'\n\nMagnitude: %s \n\nDistance: %.2f [km] - %.2f [°]\n\nDepth: %.2f [km]'
-                              % (str(event).split('\n')[0][57:64], 0.001 * DS,
-                                 0.001 * DS / 111.11, depth),
-                                fontsize=18, fontweight='bold')
-                ax = plt.gca()
-                ax.axis('off')
-
-                plt.subplot2grid((4, 9), (3, 0), colspan=2)
-                plt.title(u'Event Information: \n Global Centroid-Moment-Tensor'
-                          ' Catalog (GCMT)'
-                          '\n\n Processing Date:\n'+str(UTCDateTime().date),
-                          fontsize=14)
-                ax = plt.gca()
-                ax.axis('off')
-
-        # close and local events
-        else:
-            map.scatter(statlon, statlat, 200, color="b", marker="v",
-                                                    edgecolor="k", zorder=100)
-            plt.text(statlon + 35000, statlat, station, fontsize=12, va="top",
-                                family="monospace", weight="bold", zorder=101,
-                                color='k', backgroundcolor='white')
-            map.scatter(x, y, 300, color="b", marker="*", edgecolor="k", 
-                                                                    zorder=100)
-
-            if mode == 'link':
-                plt.subplot2grid((4, 9), (1, 0), colspan=2)
-                plt.title(u'Event: %s \n %s \n \n' % (startev, mt_region),
-                          fontsize=20, weight='bold')
-                ax = plt.gca()
-                ax.axis('equal')
-                ax.axis('off')
-                b = beach(moment_tensor, xy=(0.5, 0.5), facecolor='blue',
-                                            width=0.5, linewidth=1, alpha=1.0)
-                b.set_zorder(200)
-                ax.add_collection(b)
-
-                plt.subplot2grid((4, 9), (2, 0), colspan=2)
-
-                plt.title(u'\nMagnitude: %s \n\nDistance: %.2f [km], %.2f [°]'
-                          '\n\nDepth: %.2f [km]'
-                          % (str(event).split('\n')[0][57:64], 0.001 * DS,
-                             0.001 * DS / 111.11, depth), fontsize=18,
-                          fontweight='bold')
-                ax = plt.gca()
-                ax.axis('off')
-                plt.subplot2grid((4, 9), (3, 0), colspan=2)
-                plt.title(u'Event Information: \n Global Centroid-Moment-Tensor'
-                          ' Catalog (GCMT)'
-                          '\n\n Processing Date:\n'+str(UTCDateTime().date),
-                          fontsize=14)
-                ax = plt.gca()
-                ax.axis('off')
-
-            else:
-                plt.subplot2grid((4, 9), (1, 0), colspan=2)
-                plt.title(u'Event: %s %sZ\n' % (startev.date, startev.time), 
-                                                    fontsize=20, weight='bold')
-                ax = plt.gca()
-                ax.axis('equal')
-                ax.axis('off')
-
-                plt.subplot2grid((4, 9), (2, 0), colspan=2)
-                if reg==True:
-                    plt.title(u'\n\nRegion: %s \n\nMagnitude: %s \n\nDistance: %.2f [km], %.2f [°]\n\nDepth: %.2f [km]'
-                              % (region, str(event).split('\n')[0][57:64], 0.001 * DS,
-                                 0.001 * DS / 111.11, depth),
-                                                 fontsize=18, fontweight='bold')
-                else:
-                    plt.title(u'\nMagnitude: %s \n\nDistance: %.2f [km], %.2f [°]'
-                              '\n\nDepth: %.2f [km]'
-                              % (str(event).split('\n')[0][57:64], 0.001 * DS,
-                                 0.001 * DS / 111.11, depth), 
-                                                fontsize=18,fontweight='bold')
-                ax = plt.gca()
-                ax.axis('off')
-                plt.subplot2grid((4, 9), (3, 0), colspan=2)
-                plt.title(u'Event Information: \n Global Centroid-Moment-Tensor'
-                          ' Catalog (GCMT)'
-                          '\n\n Processing Date:\n'+str(UTCDateTime().date),
-                          fontsize=14)
-                ax = plt.gca()
-                ax.axis('off')
-
-    # stations other than RLAS, not tested yet
+    # stations other than RLAS, not tested yet - was written for PFO
     else:
         x, y = map(event_lon, event_lat)
         statlon, statlat = map(station_lon, rt[0].stats.
                                coordinates.latitude)
 
-        if is_local(DS) == 'local':
+        if is_local(ds_in_km) == 'LOCAL':
             map.scatter(x, y, 600, color="b", marker="*", edgecolor="k",
                                                                     zorder=100)
             map.scatter(statlon, statlat, 700, color="b", marker="v",
@@ -1656,7 +1550,7 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
             plt.text(statlon + 27000, statlat, station, fontsize=18, va="top",
                                 family="monospace", weight="bold", zorder=101,
                                  color='k', backgroundcolor='white')
-        elif is_local(DS) == 'far':
+        elif is_local(ds_in_km) == 'FAR':
             map.scatter(x, y, 200, color="b", marker="*", edgecolor="k",
                                                                      zorder=100)
             map.scatter(statlon, statlat, 300, color="b", marker="v",
@@ -1700,14 +1594,13 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
         os.path.join(folder_name,tag_name + '_{}_page_1.png'.format(station)))
     plt.close()
     print("Done")
-
     # ======================================================================== 
     #                                   
     #               Preprocessing of rotations and translations
     #
     # =========================================================================
     rt, ac, rt_pcoda, ac_pcoda, sec, sec_p, cutoff, cutoff_pc = resample(
-                                                    is_local(DS), rt, ac)
+                                                    is_local(ds_in_km), rt, ac)
 
     print("Removing instrument response...")
     # remove instrument response based on station
@@ -1718,16 +1611,16 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
     # filter raw data, rotate some to theoretical backazimuth, separate Pcoda
     trv_acc, trv_pcoda, rt_bands, trv_bands, rt_pcoda_coarse, trv_pcoda_coarse,\
     filt_rt_pcoda, filt_ac_pcoda, filt_trv_pcoda = filter_and_rotate(
-                    rt, ac, rt_pcoda, ac_pcoda, cutoff, cutoff_pc, is_local(DS))
+            rt, ac, rt_pcoda, ac_pcoda, cutoff, cutoff_pc, is_local(ds_in_km))
 
     print("Getting theoretical arrival times...")
     # find trace start
     init_sec = startev - ac[0].stats.starttime
 
     # theoretical arrival times for seismics phases
-    arriv_p, arriv_s = ps_arrival_times(DS, depth, init_sec)
+    arriv_p, arriv_s = ps_arrival_times(ds_in_km, depth, init_sec)
     min_pw, max_pw, min_sw, max_sw, min_lwi, max_lwi, min_lwf, max_lwf = \
-                    time_windows(DS, arriv_p, arriv_s, init_sec, is_local(DS))
+                    time_windows(ds_in_km, arriv_p, arriv_s, init_sec, is_local(ds_in_km))
 
     # ======================================================================== 
     #                                
@@ -1760,7 +1653,7 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
                      - abs(min(rt[0].data)))/2  
     
     # gap between annotation and vertical
-    if is_local(DS) == 'far':  
+    if is_local(ds_in_km) == 'FAR':  
         xgap = 50
     else:
         xgap = 15
@@ -2278,13 +2171,10 @@ if __name__ == '__main__':
     parser.add_argument('--station', help='Choice of station: RLAS, ROMY\
         (default is RLAS)', type=str, default='RLAS')
     parser.add_argument('--mode', help='Choose catalog to download events: \
-        GCMT catalog for the most up to date catalog. Link for plotting single \
-        event beachballs (requires --link to event). ISC QuakeML file for \
+        GCMT catalog for the most up to date catalog. ISC QuakeML file for \
         catalog of local/regional events. IRIS for most stable solutions, \
         though recent events might not be present \
-        (default: gcmt, else: iscquakeml, iris, link)', type=str,default='GCMT')
-    parser.add_argument('--link',help='URL of moment tensor link, to plot \
-        beachballs for a single event --mode',type=str,default='blank')
+        (default: gcmt, else: iscquakeml, iris)', type=str,default='GCMT')
     parser.add_argument('--polarity', help='Flip polarity of rotation data to \
         fix data errors, to be used in specific time windows of catalog rerun \
         (default: normal, otherwise: reverse)',type=str, default='normal')
@@ -2324,15 +2214,9 @@ if __name__ == '__main__':
     mode = args.mode.upper()
     polarity = args.polarity.lower()
     instrument = args.instrument.upper()
-    link = args.link
-
-    # --link should lead to the quakeml webpage of a certain event on IRIS.
-    # The fetched xml provides a moment tensor data for the beachballs.
-    # i.e. 'http://www.iris.edu/spudservice/momenttensor/736631/quakeml'
 
     # [default]: get event catalog from GCMT NEW QUICK,
-    # or link mode if moment tensor link is given
-    if mode == 'GCMT' or (mode =='link' and link != 'blank'):
+    if mode == 'GCMT':
         catalog = 'GCMT'
         event_source = 'GCMT'
         if UTCDateTime(args.min_datetime) < UTCDateTime(2014,1,1):
@@ -2395,6 +2279,7 @@ if __name__ == '__main__':
     bars = '='*79
     error_list = []
     for event in cat:
+        import pdb;pdb.set_trace
         try:
             tag_name, folder_name, check_folder_exists = generate_tags(event)
 
@@ -2416,7 +2301,7 @@ if __name__ == '__main__':
                         already_processed += 1
                     else:
                         try:
-                            plot_waveform_comp(event, station, link, mode,
+                            plot_waveform_comp(event, station, mode,
                                                         folder_name, tag_name)
                             success_counter += 1
 
@@ -2447,7 +2332,7 @@ if __name__ == '__main__':
                 
                 # run processing function
                 try:
-                    plot_waveform_comp(event, station, link, mode,
+                    plot_waveform_comp(event, station, mode, 
                                                         folder_name, tag_name)
                     success_counter += 1
                 
