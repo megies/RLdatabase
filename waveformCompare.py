@@ -2165,8 +2165,6 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
     c1_p = .5 * (max(abs(trv_pcoda[0].data[0:max_lwi_ac])) /
                  max(abs(rt_pcoda[0].data[0:max_lwi_ac])))
 
-    # * as of right now c1_p is correct without highpass filtering, why?
-
     maxcorr_p_list = []
     for m in range(0, len(maxcorr_p)):
         if np.max(corrbaz_p[:,m]) >= 0.5:
@@ -2180,7 +2178,6 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
     #               Cross correlations for P-Coda time window
     #
     # ========================================================================= 
-    import pdb;pdb.set_trace()
     # P-coda limits
     xlim1 = rt[0].stats.delta * len(rt[0].data) 
     Xp, Yp = np.meshgrid(np.arange(0,sec_p * len(corrcoefs_p), sec_p), backas_p)
@@ -2208,16 +2205,16 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
     plt.subplot2grid((5, 26), (1, 0), colspan=25, rowspan=2)
 
     plt.plot(time_p, rt_pcoda[0].data, color='r', label=r'Rotation rate')
-    plt.plot(time_p, (0.5 / c1_p) * filt_trv_pcoda[0].data + fact1_p, color='k',
+    plt.plot(time_p, (0.5 / c1_p) * trv_pcoda[0].data + fact1_p, color='k',
                                              label=r'Transversal acceleration')
     plt.ylabel(r'$\dot{\mathbf{\Omega}}_\mathbf{z}$ [nrad/s] -'
                    'a$_\mathbf{T}$/2c [1/s]', fontweight='bold', fontsize=11)
     plt.xlim(0, (min_lwi + max_lwi) // 2)
     plt.ylim(min(rt_pcoda[0].data[0:max_lwi_ac]), 
-        fact1_p + max((1. / (2. * c1_p)) * filt_trv_pcoda[0].data[0:max_lwi_ac]))
+        fact1_p + max((1. / (2. * c1_p)) * trv_pcoda[0].data[0:max_lwi_ac]))
     xlim2 = (min_lwi + max_lwi) // 2
     box_yposition2 = (fact1_p + max((1. / (2. * c1_p)) * 
-                        filt_trv_pcoda[0].data[0:max_lwi_ac]) -
+                        trv_pcoda[0].data[0:max_lwi_ac]) -
                         np.abs(min(rt_pcoda[0].data[0: max_lwi_ac])))/2.
     plt.axvline(x=min_pw, linewidth=1)
     plt.annotate('P-arrival', 
