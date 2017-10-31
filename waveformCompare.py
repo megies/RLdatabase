@@ -665,8 +665,21 @@ def filter_and_rotate(ac, rt, baz, rt_pcoda, ac_pcoda, cutoff, cutoff_pc,
     pcoda_rotate_coarse = ac_pcoda_coarse.copy()
 
     rotate.rotate(method = 'NE->RT')
-    pcoda_rotate.rotate(method = 'NE->RT')
-    pcoda_rotate_coarse.rotate(method = 'NE->RT')
+    trv_pcoda = pcoda_rotate.rotate(method = 'NE->RT').select(component='T')
+    trv_pcoda_coarse = pcoda_rotate_coarse.rotate(method = 'NE->RT').select(
+                                                                component='T')
+
+
+    # filter pcoda for rotations (finer sampling) for BAz analysis
+    filt_rt_pcoda = rt_pcoda.copy()
+    filt_rt_pcoda.filter('highpass', freq=cutoff_pc, corners=2, zerophase=True)
+    
+    # filter pcoda for translations
+    filt_ac_pcoda = ac_pcoda.copy()
+    filt_ac_pcoda.filter('highpass', freq=cutoff_pc, corners=2, zerophase=True)
+    filt_ac_pcoda_tmp = filt_ac_pcoda.copy()
+    filt_trv_pcoda = filt_ac_pcoda_tmp.rotate(method = 'NE->RT').select(
+                                                                component='T')
     
     # for varying frequency bands, rotate to TRansVerse component, filter 
     for I in range(number_of_bands):
@@ -680,15 +693,8 @@ def filter_and_rotate(ac, rt, baz, rt_pcoda, ac_pcoda, cutoff, cutoff_pc,
                                 zerophase = True)
 
 
-
-    # Filter Pcoda specific traces (finer sampling) for BAz analysis
-    filt_rt_pcoda = rt_pcoda.copy()
-    filt_rotate = ac_pcoda.copy()
-    filt_rt_pcoda.filter('highpass', freq=cutoff_pc, corners=2, zerophase=True)
-    filt_rotate.rotate(method = 'NE->RT')
-
-    return rt_bands, trv_bands, rotate, rt_pcoda_coarse, \
-            pcoda_rotate_coarse, filt_rt_pcoda, filt_rotate 
+    return rt_bands, trv_bands, rotate, rt_pcoda_coarse, trv_pcoda, trv_pcoda_coarse,\
+            pcoda_rotate_coarse, filt_rt_pcoda, filt_ac_pcoda, filt_trv_pcoda 
 
 
 
@@ -861,7 +867,7 @@ def surf_tts(distance, start_time):
     return arrival
 
 
-def get_corrcoefs(streamA, streamB, sec, station):
+def get_corrcoefs(streamA, streamB, sec):
 
     """
     Calculates the zero-lag correlation coefficients between two streams
@@ -903,7 +909,7 @@ def get_corrcoefs(streamA, streamB, sec, station):
     return corrcoefs, thres
 
 
-def baz_analysis(rt, ac, sec, station):
+def baz_analysis(rt, ac, sec):
 
     """
     Backazimuth analysis: Computes the correlation coefficients for
@@ -929,7 +935,7 @@ def baz_analysis(rt, ac, sec, station):
     :rtype corrbaz: numpy.ndarray
     :return corrbaz: Correlation coefficients for each backazimuth.
     :rtype maxcorr: numpy.ndarray
-    :return maxcorr: Backazimuth values for maximum correlation for each time
+    :return maxcorr: Backazac_pimuth values for maximum correlation for each time
         window.
     :rtype backas: numpy.ndarray
     :return backas: Vector containing backazimuths (step: 10°).
@@ -1766,9 +1772,9 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
 
     print("Filtering and rotating traces...")
     # filter raw data, rotate some to theoretical backazimuth
-    rt_bands, trv_bands, rotate, rt_pcoda_coarse, pcoda_rotate_coarse, \
-    filt_rt_pcoda, filt_rotate = filter_and_rotate(ac, rt, BAz, 
-                rt_pcoda, ac_pcoda, cutoff, cutoff_pc, station, is_local(DS))
+    rt_bands, trv_bands, rotate, rt_pcoda_coarse, trv_pcoda, trv_pcoda_coarse,\
+    pcoda_rotate_coarse, filt_rt_pcoda, filt_ac_pcoda, filt_trv_pcoda  = filter_and_rotate(
+    ac, rt, BAz, rt_pcoda, ac_pcoda, cutoff, cutoff_pc, station, is_local(DS))
 
     print("Getting theoretical arrival times...")
     # find event start and theoretical arrival times for seismics phases
@@ -1838,9 +1844,6 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
     rt_SR = int(rt[0].stats.sampling_rate)
     rt_pcoda_SR = int(rt_pcoda_coarse[0].stats.sampling_rate)
     
-    # transverse acceleration pcoda
-    pc_trv_acc = pcoda_rotate_coarse.select(component='T')
-
     # pwave arrival times in samples for normal trace and pcoda
     min_pw_rt = rt_SR * min_pw
     max_pw_rt = rt_SR * max_pw
@@ -1848,17 +1851,17 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
     max_pw_pcrt = rt_pcoda_SR * max_pw
 
     # pcoda phase velocity
-    cp = 0.5 * (max(abs(pc_trv_acc[0][min_pw_pcrt:max_pw_pcrt]))/
+    cp = 0.5 * (max(abs(trv_pcoda_coarse[0][min_pw_pcrt:max_pw_pcrt]))/
                 max(abs(rt_pcoda_coarse[0].data[min_pw_pcrt:max_pw_pcrt])))
 
     # find min and max trace amplitudes for y-limits
-    min_ta_pcod = min((0.5 / cp) * pc_trv_acc[0][min_pw_rt:max_pw_rt])
-    max_ta_pcod = max((0.5 / cp) * pc_trv_acc[0][min_pw_rt:max_pw_rt])
+    min_ta_pcod = min((0.5 / cp) * trv_pcoda_coarse[0][min_pw_rt:max_pw_rt])
+    max_ta_pcod = max((0.5 / cp) * trv_pcoda_coarse[0][min_pw_rt:max_pw_rt])
     min_rt_pcod = min(rt_pcoda_coarse[0].data[min_pw_rt:max_pw_rt])
     max_rt_pcod = max(rt_pcoda_coarse[0].data[min_pw_rt:max_pw_rt])
 
     plt.plot(time, rt_pcoda_coarse[0].data, color='r')
-    plt.plot(time, (0.5 / cp) * pc_trv_acc[0], color='k')
+    plt.plot(time, (0.5 / cp) * trv_pcoda_coarse[0], color='k')
     plt.xlim(min_pw, max_pw)
     plt.ylim(min([min_ta_pcod, min_ta_pcod]), max([max_rt_pcod, max_rt_pcod]))
     plt.xlabel(r'Time [s]', fontweight='bold', fontsize=11)
@@ -1961,7 +1964,7 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
     print("Finding zero-lag correlation coefficients...")
 
     # correlate vertical rotation rate and transverse acceleration
-    corrcoefs, thres = get_corrcoefs(rt, trv_acc, sec, station)
+    corrcoefs, thres = get_corrcoefs(rt, trv_acc, sec)
 
     # calculate correlations for different frequency bands given by seconds_list
     corrcoefs_bands, thresholds = [], []
@@ -1970,15 +1973,14 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
     for i in range(len(rt_bands)):
         corrcoefs_tmp, thresh_tmp = get_corrcoefs(streamA = rt_bands[i],
                                                   streamB = trv_bands[i],
-                                                  sec = seconds_list[i], 
-                                                  station = station)
+                                                  sec = seconds_list[i])
         corrcoefs_bands.append(corrcoefs_tmp)
         thresholds.append(thresh_tmp)
 
     # zero-lag correlation coefficients for range of backazimuths
     print("Analyzing correlation by BAz bins...")
     corrbaz, maxcorr, backas, max_coefs_10deg = baz_analysis(
-                                                    rt, ac, sec, station)
+                                                    rt, ac, sec)
 
     # estimate backazimuth and correlations for given BAz
     print("Estimating best backazimuth value...")
@@ -2118,47 +2120,49 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
     print("Analyzing rotations in the P-coda")
     
     # Zero-lag correlation coefficients
-    print("Zero-Lag cross correlation...",end=" ")
+    print("Zero-lag cross correlation...",end=" ")
 
     # integer sampling rates
     rt_pc_SR = int(filt_rt_pcoda[0].stats.sampling_rate)
-    trv_pc_SR = int(filt_rotate[0].stats.sampling_rate)
+    ac_pc_SR = int(filt_trv_pcoda[0].stats.sampling_rate)
     
     corrcoefs_p = []
     lwi_average = int(round((min_lwi+max_lwi)/2))
 
-    # separate transverse and vertical components
-    trv_acc_pcoda = filt_rotate.select(component='T')
+    # separate vertical components
     acZ_pcoda = ac_pcoda.select(component='Z')
 
     # cut pcoda at correct time window and taper cuts
     rt_pcoda_cut = filt_rt_pcoda.copy()
-    trv_pcoda_cut = trv_acc_pcoda.copy()
+    ac_pcoda_cut = filt_ac_pcoda.copy()
+    trv_pcoda_cut = filt_trv_pcoda.copy()
 
     rt_pcoda_cut[0].data = filt_rt_pcoda[0].data[0:lwi_average * rt_pc_SR]
-    trv_pcoda_cut[0].data = trv_pcoda_cut[0].data[0:lwi_average * trv_pc_SR]
-    for traces in [rt_pcoda_cut,trv_pcoda_cut]:
+    for i in range(3):
+        ac_pcoda_cut[i].data = filt_ac_pcoda[i].data[0:lwi_average * ac_pc_SR]
+    trv_pcoda_cut[0].data = trv_pcoda_cut[0].data[0:lwi_average * ac_pc_SR]
+    for traces in [rt_pcoda_cut,ac_pcoda_cut,trv_pcoda_cut]:
         traces.taper(max_percentage=0.05)
+
 
     # find correlations
     corrcoefs_p, thres_p = get_corrcoefs(
-                                    rt_pcoda_cut, trv_pcoda_cut, sec_p, station)
+                                    rt_pcoda_cut, trv_pcoda_cut, sec_p)
 
     print("Backzimuth...")
 
     # surface wave start sample
-    max_lwi_ac = trv_pc_SR * max_lwi
+    max_lwi_ac = ac_pc_SR * max_lwi
 
     # analyze backazimuth
     corrbaz_p, maxcorr_p, backas_p, max_coefs_10deg_p = baz_analysis(
-                                    rt_pcoda_cut, trv_pcoda_cut, sec_p, station)
+                                    rt_pcoda_cut, ac_pcoda_cut, sec_p) # AC!!
 
     # set up arrays for plotting
     time_p = rt_pcoda_cut[0].stats.delta * np.arange(0, len(rt_pcoda[0].data))
     fact1_p = 2 * max(rt_pcoda[0].data[0:max_lwi_ac])
 
-
-    c1_p = .5 * (max(abs(trv_acc_pcoda[0].data[0:max_lwi_ac])) /
+    c1_p = .5 * (max(abs(trv_pcoda[0].data[0:max_lwi_ac])) /
                  max(abs(rt_pcoda[0].data[0:max_lwi_ac])))
 
     # * as of right now c1_p is correct without highpass filtering, why?
@@ -2183,7 +2187,6 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
 
     print("\nPage 4 > P-Coda Waveform Comparison...",end=" ")
 
-    import pdb;pdb.set_trace()
     # subplot 1
     plt.figure(figsize=(18, 9))
     plt.subplot2grid((5, 26), (0, 0), colspan=25)
@@ -2205,16 +2208,16 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
     plt.subplot2grid((5, 26), (1, 0), colspan=25, rowspan=2)
 
     plt.plot(time_p, rt_pcoda[0].data, color='r', label=r'Rotation rate')
-    plt.plot(time_p, (0.5 / c1_p) * trv_acc_pcoda[0].data + fact1_p, color='k',
+    plt.plot(time_p, (0.5 / c1_p) * filt_trv_pcoda[0].data + fact1_p, color='k',
                                              label=r'Transversal acceleration')
     plt.ylabel(r'$\dot{\mathbf{\Omega}}_\mathbf{z}$ [nrad/s] -'
                    'a$_\mathbf{T}$/2c [1/s]', fontweight='bold', fontsize=11)
     plt.xlim(0, (min_lwi + max_lwi) // 2)
     plt.ylim(min(rt_pcoda[0].data[0:max_lwi_ac]), 
-        fact1_p + max((1. / (2. * c1_p)) * trv_acc_pcoda[0].data[0:max_lwi_ac]))
+        fact1_p + max((1. / (2. * c1_p)) * filt_trv_pcoda[0].data[0:max_lwi_ac]))
     xlim2 = (min_lwi + max_lwi) // 2
     box_yposition2 = (fact1_p + max((1. / (2. * c1_p)) * 
-                        trv_acc_pcoda[0].data[0:max_lwi_ac]) -
+                        filt_trv_pcoda[0].data[0:max_lwi_ac]) -
                         np.abs(min(rt_pcoda[0].data[0: max_lwi_ac])))/2.
     plt.axvline(x=min_pw, linewidth=1)
     plt.annotate('P-arrival', 
