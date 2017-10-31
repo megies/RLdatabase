@@ -26,35 +26,21 @@ tag with rotational parameters, to be used in the JANE format database
 + a human readable (.json) ordered dictionary text file that contains both
 event and station information, as well as output data results from processing
 
-
-INFORMATION: This script can be used to generate figures for the database.
+Extra Information:
 
 + QuakeML files can be read in directly, for example to pull events from other 
 catalogs (ISC, ...) by setting: --mode qmlfile
 
 + Events can be chosen from the IRIS FDSN catalog, which is usually faster
-and more abundant especially for older events. Set: --mode fdsn
+and more abundant especially for older events. Set: --mode iris
 
-+ Events are bandstoppped for the secondary microseism (5-12s) if they are 
-non-local.
++ Non-local events are bandstoppped for the secondary microseism (5-12s) 
 
-+ maximum correlation coefficients for the estimated BAz are added 
-in the subplot 3 on page 3.
++ maximum correlation coefficients for the estimated BAz are added on page 3.3
 
 + only 0.5 hour recordings shown for local and close events!
 
 + P-coda windows (sec_p) now shorter for local and close events (2s).
-
-+ 28.09.17 - To-change log: 
-    -Get_corrcoeffs: clean up the cross correlation for loops
-    -phas_vel: numpy mean of empty slice throwing runtime warning
-    -filter_and_rotate: can compress the different filter bands into a few lines
-    -resample: no else finish - may throw error?
-    -plot_wa...: figure out what to do with the flip call
-        -minimize misfit or waterlevel method at taper
-    -phase velocities:
-        threshold value of corrcoef as a parameter
-        phase velocity estimation by misfit minimization
 
 """
 import os
@@ -80,7 +66,7 @@ from obspy.taup import TauPyModel
 from obspy.core.stream import Stream
 from obspy import read_events, Catalog
 from mpl_toolkits.basemap import Basemap
-# from obspy.imaging.beachball import Beach
+from obspy.imaging.beachball import beach
 from obspy.signal.rotate import rotate_ne_rt
 from obspy.core.utcdatetime import UTCDateTime
 from obspy.core.util.attribdict import AttribDict
@@ -97,42 +83,35 @@ from obspy.geodetics.base import gps2dist_azimuth, locations2degrees
 #     raise ValueError('I need Matplotlib version 1.0 or newer.')
 
 class RotationalProcessingException(Exception):
+
     """
     Exception for when no data can be found for an event
     """
     pass
 
 def download_data(origin_time, instrument_id, source):
+
     """
-    It downloads the data from seismic stations for the desired event(s).
-    Inputs are the origin time (UTC), network, station, location and channel
-    of the event. Returns a stream object fetched from Arclink. If Arclink
-    does not work data is alternatively fetched from Seishub.
+    Downloads channel data from for the desired event day and origin time.
+    Parses the instrument ID to find the correct channel to grab from.
+    Cascading search: will first check to see if data is available on file 
+    (LMU/FFB archives - assumes these paths do not exist on personal computers);
+    if paths are not found, resorts to querying FDSN webservice from the list of
+    sources given. Returns the data stream, and the source from which it
+    was fetched.
 
     :type origin_time: :class: `~obspy.core.utcdatetime.UTCDateTime`
-    :param origin_time: origin time of the event.
-    :type net: str
-    :param net: Network code, e.g. ``'BW'``.
-    :type sta: str
-    :param sta: Station code, e.g. ``'WET'``.
-    :type loc: str
-    :param loc: Location code, e.g. ``'01'``. Location code may
-        contain wild cards.
-    :type chan: str
-    :param chan: Channel code, e.g. ``'EHE'``. Channel code may
-        contain wild cards.
-
-    :type st: Stream object :class: `~obspy.core.stream.Stream`
-    :return st: fetched data stream
+    :param origin_time: event origin time.
+    :type instrument_id: str
+    :param net: FDSN SEED name for channel (i.e. `BW.RLAS..BJZ`)
+    :type soure: list of str's
+    :param source: list of URL's of FDSN webservices.
+    :rtype st: :class: `~obspy.core.stream.Stream`
+    :return st: data fetched as a stream object.    
+    :rtype data_source: str
+    :return data_source: Source where data was fetched successfully 
     """
-    # arclink is deprecated, but call is kept for posterity? rip
-    # try:
-    #     c = arclinkClient(user='test@obspy.org')
-    #     st = c.get_waveforms(network=net, station=sta, location='', 
-    #                          channel=chan,
-    #                          starttime=origin_time-190,
-    #                          endtime=origin_time+3*3600+10)
-    
+
     # check paths to see if running on FFB, LMU or neither
     st = None
     dataDir_get = '/bay200/mseed_online/archive/' #FFB
@@ -143,7 +122,7 @@ def download_data(origin_time, instrument_id, source):
     
     net, sta, loc, cha = instrument_id.split('.')
     
-    # if data path exists, read in data from file
+    # if data path exists, create file path names for day and day+1
     if dataDir_get:
         print("Fetching {} data from file".format(net))
         fileName = '.'.join(instrument_id,'D',origin_time.strftime('%Y.%j'))
@@ -155,6 +134,7 @@ def download_data(origin_time, instrument_id, source):
         filePath2 = os.path.join(dataDir_get, origin_time2.strftime('%Y'),
                                 net, sta, chan + '.D', fileName2)
 
+        # if full path exists, read in data, check if time extends to day+1
         if os.path.isfile(filePath):
             data_source = 'Archive'
             if origin_time.hour > 21:
@@ -191,6 +171,7 @@ def download_data(origin_time, instrument_id, source):
         raise RotationalProcessingException(
                                         "Data not available for this event")
 
+    # trim full waveform around event
     st.trim(starttime=origin_time-180, endtime=origin_time+3*3600)
     print("\tDownload of {!s} {!s} data successful".format(
               st[0].stats.station, st[0].stats.channel))
@@ -198,43 +179,43 @@ def download_data(origin_time, instrument_id, source):
     return st, data_source
 
 
-def event_info_data(event, station, mode, polarity, instrument):
+def event_info_data(event, station, polarity, instrument):
 
     """
-    Extracts information from the event and generates variables containing
-    the event latitude, longitude, depth, and origin time.
-    Ringlaser (RLAS) and broadband signals (WET) are received from the
-    download_data function.
-    The great circle distance (in m and °) between event location and station
-    in Wetzell, as well as the theoretical backazimuth are computed.
+    Extracts event information and generates necessary processing variables
+    Calls the download_data() function in order to grab waveforms.
+    Assigns correct station information to all stream objects.
+    Calculates great circle distance and backazimuth using lat/lon pairs.
 
     :type event: :class: `~obspy.core.event.Event`
     :param event: Contains the event information.
     :type station: str
-    :param station: Station from which data are fetched (i.e. 'RLAS').
-    :type mode: str
-    :param mode: Defines where data fetched from
+    :param station: Station to fetch data from.
     :type polarity: str
-    :param polarity: 'normal' or 'reverse' choice for rotation polarity
+    :param polarity: ['normal'] or 'reverse' for flipped rotation signals
     :type instrument: str
-    :param instrument: 'wet' or 'wetr' choice for translation data
+    :param instrument: 'WET' or 'WETR' choice for comparison to 'RLAS'
     :rtype event_lat: float
-    :return event_lat: Latitude of the event in degrees.
+    :return event_lat: Latitude of event in degrees.
     :rtype event_lon: float
-    :return event_lon: Longitude of the event in degrees.
+    :return event_lon: Longitude of event in degrees.
     :rtype depth: float
     :return depth: Hypocenter depth in km
     :type startev: :class: `~obspy.core.utcdatetime.UTCDateTime`
-    :return startev: Origin time of the event.
+    :return startev: Event origin time.
     :rtype rt: :class: `~obspy.core.stream.Stream`
     :return rt: Rotational signal from ringlaser.
     :rtype ac: :class: `~obspy.core.stream.Stream`
-    :return ac: Three component broadband station signal.
-    :rtype baz: tuple
-    :return baz: [0] great circle distance in m, 
+    :return ac: Three component broadband translation in N/E/Z components.
+    :rtype dist_baz: tuple
+    :return dist_baz: [0] great circle distance in m, 
                  [1] theoretical azimuth,
                  [2] theoretical backazimuth.
+    :rtype data_sources: dictionary
+    :return data_sources: collection of data source for each channel
     """
+
+    # find event start
     origin = event.preferred_origin() or event.origins[0]
     startev = origin.time
 
@@ -293,7 +274,7 @@ def event_info_data(event, station, mode, polarity, instrument):
             data_sources[channels] = srcTR
             ac += tr
         
-    # coordinates, theoretical event backazimuth and distance
+    # set attributes necessary for all stations
     event_lat = origin.latitude
     event_lon = origin.longitude
     depth = origin.depth * 0.001  # Depth in km
@@ -302,8 +283,8 @@ def event_info_data(event, station, mode, polarity, instrument):
 
     for ca in [ac[0], ac[1], ac[2], rt[0]]:
         ca.stats.coordinates = AttribDict()
-        ca.stats.coordinates['longitude'] = station_lat
-        ca.stats.coordinates['latitude'] = station_lon
+        ca.stats.coordinates['longitude'] = station_lon
+        ca.stats.coordinates['latitude'] = station_lat
         ca.stats['back_azimuth'] = dist_baz[2]
         ca.stats['starttime'] = startev - 180
         ca.stats['sampling_rate'] = 20.
@@ -311,42 +292,47 @@ def event_info_data(event, station, mode, polarity, instrument):
     return event_lat, event_lon, depth, startev, rt, ac, dist_baz, data_sources
 
 
-def is_local(distance):
+def is_local(ds_in_km):
 
     """
-    Checks whether the event is close (< 333.33 km), local (< 1111.1 km) or
-    non-local.
-
-    :type distance: float
-    :param distance: event station distance in km
+    Check whether the event is close, local or far. For epicentral distance x,
+    close:  0° < x < 3°     or        0 km < x < 333.33 km
+    local: 3° <= x < 10°    or     333.33 <= x < 1111.1 km
+    far:  10° <= x          or  1111.1 km <= x
+    
+    :type ds_in_km: float
+    :param ds_in_km: Event-station distance in km
     :rtype: str
     :return: Self-explaining string for event distance.
     """
-    if 0.001 * distance / 111.11 < 10.0:
-        if 0.001 * distance / 111.11 < 3.0:
+    # approximation of distance in degrees
+    distance_in_deg = 1E-3 * ds_in_km / 111.11
+
+    if distance_in_deg < 10.0:
+        if distance_in_deg < 3.0:
             is_local = 'close'
         else:
             is_local = 'local'
     else:
-        is_local = 'non-local'
+        is_local = 'far'
 
     return is_local
 
 
-def get_moment_tensor_magnitude(link):
+def get_moment_tensor(link):
 
     """
-    Extracts the moment tensor and magnitude for an event if an IRIS-xml file
-    is given by a url (link).
+    Extract moment tensor and magnitude for an event if an IRIS-xml file
+    is given by a URL (link).
 
     :type link: str
-    :param link: Link to the IRIS-xml, where event and moment tensor data are
-        fetched.
-    :rtype MomentTensor: list of floats
-    :return MomentTensor: List of the six independent components of the moment
-        tensor.
-    :rtype Magnitude: float
-    :return Magnitude: Moment magnitude (Mw) of the event.
+    :param link: URL to IRIS-xml
+    :rtype moment_tensor: list of floats
+    :return moment_tensor: List of the six independent MT components
+    :rtype mt_magnitude: float
+    :return mt_magnitude: Moment magnitude (Mw) of the event.
+    :rtype mt_region: str
+    :return mt_region: Region given in XML file
     """
     file = urlopen(link)
     data = file.read()
@@ -356,64 +342,53 @@ def get_moment_tensor_magnitude(link):
     xmlTag = dom.getElementsByTagName('value')
     xmlTag2 = dom.getElementsByTagName('text')
     
-    # 19th value in xml-file
-    Magnitude = float(xmlTag[19].firstChild.nodeValue)
-    Region = str(xmlTag2[0].firstChild.nodeValue)
-    MomentTensor = []
+    mt_magnitude = float(xmlTag[19].firstChild.nodeValue)
+    mt_region = str(xmlTag2[0].firstChild.nodeValue)
+    moment_tensor = []
 
     for i in range(1, 7):
         value = float(xmlTag[i].firstChild.nodeValue)
-        MomentTensor.append(value)
+        moment_tensor.append(value)
 
-    return MomentTensor, Magnitude, Region
+    return moment_tensor, mt_magnitude, mt_region
 
 
 def resample(is_local, rt, ac):
 
     """
-    Resamples signal accordingly with sampling rates and cut-off frequencies
-    dependent on the location of the event (5 sec and 2Hz for local events,
-    60 sec and 1 Hz for non-local events).
+    Resample signal dependent on locality of event.
 
     :type is_local: str
     :param is_local: Self-explaining string for event distance.
-    :type baz: tuple
-    :param baz: [0] Great circle distance in m, 
-                [1] azimuth A->B in degrees,
-                [2] backazimuth B->A in degrees.
     :type rt: :class: `~obspy.core.stream.Stream`
     :param rt: Rotational signal from ringlaser.
     :type ac: :class: `~obspy.core.stream.Stream`
-    :param ac: Three component broadband station signal.
+    :param ac: Three component broadband translation
     :rtype rt: :class: `~obspy.core.stream.Stream`
-    :return rt: Decimated rotational signal from ringlaser.
+    :return rt: Resampled rotational signal from ringlaser.
     :rtype ac: :class: `~obspy.core.stream.Stream`
-    :return ac: Decimated three component broadband station signal.
+    :return ac: Resampled three component broadband station signal.
     :rtype rt_pcoda: :class: `~obspy.core.stream.Stream`
-    :return rt_pcoda: (Decimated) copy of rotational signal from ringlaser
-        for p-coda calculation.
+    :return rt_pcoda: (Decimated) copy of rt for p-coda calculation.
     :rtype ac_pcoda: :class: `~obspy.core.stream.Stream`
-    :return ac_pcoda: (Decimated) copy of the three component broadband
-        station signal for p-coda calculation.
-    :rtype sec: int
-    :return sec: Time window length.    
-    :rtype cutoff: float
-    :return cutoff: Cut-off frequency for the lowpass filter.
-    :rtype cutoff_pc: float
-    :return cutoff_pc: Cut-off frequency for the highpass filter in P-coda.
+    :return ac_pcoda: (Decimated) copy of ac for p-coda calculation.
+    :rtype sec/sec_p: int
+    :return sec/sec_p: Time window length.
+    :rtype cutoff/cutoff_pc: float
+    :return cutoff: Cut-off frequency for lowpass filter.
     """
 
-    cutoff_pc = 0.5  # Cut-off frequency for the highpass filter in the P-coda
-    if is_local == 'non-local':
+    cutoff_pc = 0.5 # cutoff for pcoda lowpass
+    if is_local == 'far':
         rt_pcoda = rt.copy()
         ac_pcoda = ac.copy()
         rt_pcoda.decimate(factor=2)
         ac_pcoda.decimate(factor=2)
         rt.decimate(factor=4)
         ac.decimate(factor=4)
-        sec = 120 # Length of time window in seconds
-        sec_p = 5 # Pcoda time window in seconds
-        cutoff = 1.0 # Cut-off freq for the lowpass filter
+        sec = 120 # length of time window in seconds
+        sec_p = 5 # pcoda time window in seconds
+        cutoff = 1.0 # cut-off freq for full-trace lowpass
     elif is_local == 'local':
         for trr in (rt + ac):
             trr.data = trr.data[0: int(1800 * rt[0].stats.sampling_rate)]
@@ -441,39 +416,34 @@ def resample(is_local, rt, ac):
 def remove_instr_resp(rt, ac, rt_pcoda, ac_pcoda, station, startev):
 
     """
-    This function removes the instrument response from the original signal
-    and checks if starttime and endtime match for both instruments. 
-    * Note for Poles and Zeros:
-        1 zero acceleration/ 2 zeros velocity/ 3 zeros displacement for STS2 
-
+    Remove instrument response from the original signal
+    General highpass and lowpass to remove signal outside instrument capability
+    * Note for STS2 Poles and Zeros:
+        1 zero acceleration/ 2 zeros velocity/ 3 zeros displacement
 
     :type rt: :class: `~obspy.core.stream.Stream`
     :param rt: Rotational signal from ringlaser.
     :type ac: :class: `~obspy.core.stream.Stream`
-    :param ac: Three component broadband station signal.
+    :param ac: Three component broadband translation.
     :type rt_pcoda: :class: `~obspy.core.stream.Stream`
-    :param rt_pcoda: Copy of rotational signal from ringlaser
-        for p-coda calculation.
+    :param rt_pcoda: Copy of rt for p-coda calculation.
     :type ac_pcoda: :class: `~obspy.core.stream.Stream`
-    :param ac_pcoda: Copy of the three component broadband
-        station signal for p-coda calculation.
+    :param ac_pcoda: Copy of ac for p-coda calculation.
     :type station: str
-    :param station: Station from which data are fetched (i.e. 'RLAS').
+    :param station: Station of interest.
     :type startev: :class: `~obspy.core.utcdatetime.UTCDateTime`
-    :param startev: Origin time of the event.
+    :param startev: Event origin time
     :rtype rt: :class: `~obspy.core.stream.Stream`
-    :return rt: Detrended and trimmed rotational signal from ringlaser.
+    :return rt: Detrended, trimmed rotation signal.
     :rtype ac: :class: `~obspy.core.stream.Stream`
-    :return ac: Detrended and trimmed three component broadband station signal.
+    :return ac: Detrended, trimmed three component translation.
     :rtype rt_pcoda: :class: `~obspy.core.stream.Stream`
-    :return rt_pcoda: Detrended and trimmed copy of rotational signal from
-        ringlaser for p-coda calculation.
+    :return rt_pcoda: Detrended and trimmed copy rt for p-coda calculation.
     :rtype ac_pcoda: :class: `~obspy.core.stream.Stream`
-    :return ac_pcoda: Detrended and trimmed copy of the three component
-        broadband station signal for p-coda calculation.
+    :return ac_pcoda: Detrended and trimmed copy of ac for p-coda calculation.
     """
 
-    # poles and zeros dictionaries for units of nanometers/s^2
+    # translation poles and zeros dictionaries, output units of nm/s^2
     paz_sts2 = {'poles': [(-0.0367429 + 0.036754j),
                           (-0.0367429 - 0.036754j)],
                 'sensitivity': 0.944019640, 
@@ -499,6 +469,7 @@ def remove_instr_resp(rt, ac, rt_pcoda, ac_pcoda, station, startev):
         rt[0].data = rt[0].data * 1/(6.3191e3)  # rotation rate: nrad/s
         rt_pcoda[0].data = rt_pcoda[0].data * 1/(6.3191e3)
 
+        # different translation instruments require different method
         if instrument == 'STS2':
             ac.simulate(paz_remove=paz_sts2, remove_sensitivity=True)  # nm/s^2
             ac_pcoda.simulate(paz_remove=paz_sts2, remove_sensitivity=True)
@@ -543,8 +514,9 @@ def remove_instr_resp(rt, ac, rt_pcoda, ac_pcoda, station, startev):
 
     return rt, ac, rt_pcoda, ac_pcoda
 
+
 def gaussian_filter(sigarray, delta, bandwidth, freq0):
-    
+
     """
     Gaussian filter function. 
     Not used in script, left incase necessary later
@@ -568,9 +540,8 @@ def gaussian_filter(sigarray, delta, bandwidth, freq0):
     # construct our gaussian according the constQ criterion of Archambeau et al.
     # do not forget negative frequencies
     beta = np.log(2.)/2.
-    g = np.sqrt(beta/np.pi)*np.exp(-beta * 
-                                    (np.abs(freq - freq0) / bandwidth) ** 2.) 
-
+    g = (np.sqrt(beta/np.pi) * 
+         np.exp(-beta * (np.abs(freq - freq0) / bandwidth) ** 2.)) 
 
     # convolve your signal by the filter in frequency domain 
     sigarray_fourier = fft(sigarray) 
@@ -585,64 +556,55 @@ def gaussian_filter(sigarray, delta, bandwidth, freq0):
     return sigarray_filtered
 
 
-def filter_and_rotate(ac, rt, baz, rt_pcoda, ac_pcoda, cutoff, cutoff_pc,
-                      station, is_local):
-
+def filter_and_rotate(rt, ac, rt_pcoda, ac_pcoda, cutoff, cutoff_pc, is_local):
 
     """
-    Filters trace data using the cut-off frequencies and
-    lowpass/ highpass and zerophase filters. Rotates the horizontal components
-    of the signal to theoretical backazimuth.
+    Filters streams: lowpass at cutoff, and highpass with zerophase filter.
+    Creates copies of ac/rt for pcoda analysis, both low and high sampling rate.
+    Create lists of stream copies for analysis in different frequency bands.
+    Output all new streams for use in later processing and plotting.
 
     :type rt: :class: `~obspy.core.stream.Stream`
     :param rt: Rotational signal from ringlaser.
     :type ac: :class: `~obspy.core.stream.Stream`
-    :param ac: Three component broadband station signal.
-    :type baz: tuple
-    :param baz: Great circle distance in m, azimuth A->B in degrees,
-        azimuth B->A in degrees.
+    :param ac: Three component broadband translation.
     :type rt_pcoda: :class: `~obspy.core.stream.Stream`
-    :param rt_pcoda: Copy of rotational signal from ringlaser
-        for p-coda calculation.
+    :param rt_pcoda: Copy of rt for p-coda calculation.
     :type ac_pcoda: :class: `~obspy.core.stream.Stream`
-    :param ac_pcoda: Copy of the three component broadband
-        station signal p-coda calculation.
-    :type cutoff: float
-    :param cutoff: Cut-off frequency for the lowpass filter.
-    :type cutoff_pc: float
-    :param cutoff_pc: Cut-off frequency for the highpass filter in P-coda.
-    :type station: str
-    :param station: Station from which data are fetched (i.e. 'RLAS').
-    :rtype rotate: :class: `~obspy.core.stream.Stream`
-    :return rotate: Stream object of the broadband station signal with
-        rotated horizontal components.
-    :rtype pcod_rotate: :class: `~obspy.core.stream.Stream`
-    :return pcod_rotate: Stream object of the broadband station signal with
-        rotated horizontal components for P-coda calculations.
-    :rtype pcoda_rotate: :class: `~obspy.core.stream.Stream`
-    :return pcoda_rotate: Stream object of the broadband station signal with
-        rotated horizontal components for P-coda calculations.
-    :rtype frtp: :class: `~obspy.core.stream.Stream`
-    :return frtp: Filtered rt_pcoda.
-    :rtype facp: :class: `~obspy.core.stream.Stream`
-    :return facp: Filtered ac_pcoda.
-    :rtype frotate: :class: `~obspy.core.stream.Stream`
-    :return frotate: Filtered and rotated ac_pcoda.
-    :rtype cop_rt: :class: `~obspy.core.stream.Stream`
-    :return cop_rt: Highpass filtered rotational trace (rt).
+    :param ac_pcoda: Copy of ac for p-coda calculation.
+    :type cutoff/cutoff_pc: float
+    :param cutoff/cutoff_pc: Cut-off frequency for lowpass filter.
+    :type is_local: str
+    :param is_local: Self-explaining string for event distance.
+    :rtype trv_acc: :class: `~obspy.core.stream.Stream`
+    :return trv_acc: T comp. of copied ac, low/highpass and bandpassed
+    :rtype trv_pcoda: :class: `~obspy.core.stream.Stream`
+    :return trv_pcoda: Copy of T component of ac_pcoda, not filtered
+    :rtype rt_bands: list of streams, :class: `~obspy.core.stream.Stream`
+    :return rt_bands: Copied rt, bandpass filtered at various freqs.
+    :rtype trv_bands: list of streams, :class: `~obspy.core.stream.Stream`
+    :return trv_bands: T comp. of copied ac, bandpass filtered at various freqs.
+    :rtype rt_pcoda_coarse: :class: `~obspy.core.stream.Stream`
+    :return rt_pcoda_coarse: Copy of rt, highpass filtered at cutoff_pc
+    :rtype trv_pcoda_coarse: :class: `~obspy.core.stream.Stream`
+    :return trv_pcoda_coarse: T comp. of ac, highpass filtered at cutoff_pc
+    :rtype filt_rt_pcoda: :class: `~obspy.core.stream.Stream`
+    :return filt_rt_pcoda: Copy of rt_pcoda, highpass filtered at cutoff_pc
+    :rtype filt_ac_pcoda: :class: `~obspy.core.stream.Stream`
+    :return filt_ac_pcoda: Copy of ac_pcoda, highpass filtered at cutoff_pc
+    :rtype filt_trv_pcoda: :class: `~obspy.core.stream.Stream`
+    :return filt_trv_pcoda: T comp. of ac_pcoda, highpass filtered at cutoff_pc
     """
 
     # set the list of frequencies for bandpass filters
     freq_list = [0.01, 0.02, 0.04, 0.1, 0.2, 0.3, 0.4, 0.6, 1.0]
     number_of_bands = len(freq_list) - 1
     
-    # copies for phase velocities and pcoda analysis
+    # lower sampling rate copies for pcoda analysis in page 2
     ac_pcoda_coarse = ac.copy()
     rt_pcoda_coarse = rt.copy()
-    rt_bands = [rt.copy() for _ in range(number_of_bands)]
-    trv_bands = [ac.copy() for _ in range(number_of_bands)]
 
-    # filter streams high and low
+    # filter base streams high and low
     ac.filter('lowpass', freq=cutoff, corners=2, zerophase=True)
     rt.filter('lowpass', freq=cutoff, corners=2, zerophase=True)
     ac.filter('highpass', freq=0.005, corners=2, zerophase=True)
@@ -652,36 +614,39 @@ def filter_and_rotate(ac, rt, baz, rt_pcoda, ac_pcoda, cutoff, cutoff_pc,
     rt_pcoda_coarse.filter(
                         'highpass', freq=cutoff_pc, corners=2, zerophase=True)
 
-    # filter out secondary microseisms (5-12s) for non-local events
-    if is_local == "non-local":    
+    # filter out secondary microseisms (5-12s) for far events
+    if is_local == "far":    
         ac.filter('bandstop', freqmin=1/12, freqmax=1/5, 
                                 corners=4, zerophase=True)
         rt.filter('bandstop', freqmin=1/12, freqmax=1/5, 
                                 corners=4, zerophase=True)
 
-    # rotate translational signals to theoretical event backazimuth
-    rotate = ac.copy()
-    pcoda_rotate = ac_pcoda.copy()
-    pcoda_rotate_coarse = ac_pcoda_coarse.copy()
+    # single out transverse acceleration for processing
+    trv_acc_tmp = ac.copy()
+    trv_acc = trv_acc_tmp.rotate(method = 'NE->RT').select(component='T')
 
-    rotate.rotate(method = 'NE->RT')
+    # rotate pcoda streams to theoretical event backazimuth, for use in page 4
+    pcoda_rotate = ac_pcoda.copy()
+    pcoda_rotate_coarse_tmp = ac_pcoda_coarse.copy()
+
     trv_pcoda = pcoda_rotate.rotate(method = 'NE->RT').select(component='T')
-    trv_pcoda_coarse = pcoda_rotate_coarse.rotate(method = 'NE->RT').select(
+    trv_pcoda_coarse = pcoda_rotate_coarse_tmp.rotate(method = 'NE->RT').select(
                                                                 component='T')
 
-
-    # filter pcoda for rotations (finer sampling) for BAz analysis
+    # highpass filter pcoda (w/ higher sampling rate), for use in page 4
     filt_rt_pcoda = rt_pcoda.copy()
-    filt_rt_pcoda.filter('highpass', freq=cutoff_pc, corners=2, zerophase=True)
-    
-    # filter pcoda for translations
     filt_ac_pcoda = ac_pcoda.copy()
     filt_ac_pcoda.filter('highpass', freq=cutoff_pc, corners=2, zerophase=True)
+    filt_rt_pcoda.filter('highpass', freq=cutoff_pc, corners=2, zerophase=True)
+
     filt_ac_pcoda_tmp = filt_ac_pcoda.copy()
     filt_trv_pcoda = filt_ac_pcoda_tmp.rotate(method = 'NE->RT').select(
                                                                 component='T')
     
-    # for varying frequency bands, rotate to TRansVerse component, filter 
+    # for phase velocity estimation of varying frequency bands
+    # rotate to TRansVerse component, filter both translations and rotations
+    rt_bands = [rt.copy() for _ in range(number_of_bands)]
+    trv_bands = [ac.copy() for _ in range(number_of_bands)]
     for I in range(number_of_bands):
         trv_bands[I] = trv_bands[I].rotate(method='NE->RT').select(
                                                                 component='T')
@@ -692,13 +657,12 @@ def filter_and_rotate(ac, rt, baz, rt_pcoda, ac_pcoda, cutoff, cutoff_pc,
                                 corners = 3,
                                 zerophase = True)
 
-
-    return rt_bands, trv_bands, rotate, rt_pcoda_coarse, trv_pcoda, trv_pcoda_coarse,\
-            pcoda_rotate_coarse, filt_rt_pcoda, filt_ac_pcoda, filt_trv_pcoda 
-
+    return trv_acc, trv_pcoda, rt_bands, trv_bands, rt_pcoda_coarse, \
+                trv_pcoda_coarse, filt_rt_pcoda, filt_ac_pcoda, filt_trv_pcoda 
 
 
-def ps_arrival_times(distance, depth, init_sec):
+
+def ps_arrival_times(ds_in_km, depth, init_sec):
 
     """
     Obtains the arrival times (in seconds after the start time of the fetched
@@ -707,21 +671,20 @@ def ps_arrival_times(distance, depth, init_sec):
     seconds (starttime_of_the_event - data_starttime)
 
     :type distance: float
-    :param distance: Great circle distance between earthquake source and
-        receiver station.
+    :param distance: Event-station distance, in km.
     :type depth: float
     :param depth: Hypocenter depth in km.
     :type init_sec: float
-    :param init_sec: Initial time of the event in sec in the fetched data.
+    :param init_sec: Initial time of the event in seconds.
     :rtype arriv_p: float
-    :return arriv_p: Arrival time of the first P-wave.
+    :return arriv_p: P-wave first arrival.
     :rtype arriv_s: float
-    :return arriv_s: Arrival time of the first S-wave.
+    :return arriv_s: S-wave first arrival.
     """
     # use taup to get the theoretical arrival times for P & S
     TauPy_model = TauPyModel('iasp91')
     tt = TauPy_model.get_travel_times(
-                                distance_in_degree=0.001 * distance / 111.11, 
+                                distance_in_degree=0.001 * ds_in_km / 111.11, 
                                 source_depth_in_km=depth)
     
     times_p,times_s = [],[]
@@ -746,17 +709,15 @@ def ps_arrival_times(distance, depth, init_sec):
     return arriv_p, arriv_s
 
 
-def time_windows(DS, arriv_p, arriv_s, init_sec, is_local):
+def time_windows(dist_in_km, arriv_p, arriv_s, init_sec, is_local):
+
     """
-    Determines time windows for arrivals and subplots for P-waves,
-    S-waves, initial and latter surface waves. 
-    Window lengths dependent on event distance.
-    Keep all values integers, as they are used for slice indexing
+    Determines time windows for P-waves S-waves, initial, latter surface waves. 
+    Window lengths depends on event distance.
+    All values set to integers, as they are used for slice indexing
 
-
-
-    :type DS: float
-    :param DS: event station distance in km
+    :type dist_in_km: float
+    :param dist_in_km: Event station distance in km
     :type arriv_p: float
     :param arriv_p: Arrival time of the first P-wave.
     :type arriv_s: float
@@ -765,32 +726,32 @@ def time_windows(DS, arriv_p, arriv_s, init_sec, is_local):
     :param init_sec: Initial time of the event in sec in the fetched data.
     :type is_local: str
     :param is_local: Self-explaining string for event distance.
-    :rtype: int
-    :return min_pw: Starttime for P-waves window.
-    :return max_pw: Endtime for P-waves window.
-    :return min_sw: Starttime for S-waves window.
-    :return max_sw: Endtime for S-waves window.
-    :return min_lwi: Starttime for initial surface-waves window.
-    :return max_lwi: Endtime for initial surface-waves window.
-    :return min_lwf: Starttime for latter surface-waves window.
-    :return max_lwf: Endtime for latter surface-waves window.
+    :rtype `all`: int
+    :return min_pw: Start time for P-waves window.
+    :return max_pw: End time for P-waves window.
+    :return min_sw: Start time for S-waves window.
+    :return max_sw: End time for S-waves window.
+    :return min_lwi: Start time for initial surface-waves window.
+    :return max_lwi: End time for initial surface-waves window.
+    :return min_lwf: Start time for latter surface-waves window.
+    :return max_lwf: End time for latter surface-waves window.
     """
 
-    if is_local == 'non-local':
+    if is_local == 'far':
         min_pw = int(arriv_p)
         max_pw = int(min_pw + (arriv_s - arriv_p) // 4)
         min_sw = int(round(arriv_s - 0.001 * (arriv_s - arriv_p)))
         max_sw = int(arriv_s + 150)
-        min_lwi = int(round(surf_tts(DS, init_sec) - 20))
-        max_lwi = int(min_lwi + round((DS/1E6) * 50)) # 50 sec per 1000 km. 
+        min_lwi = int(round(surf_tts(dist_in_km, init_sec) - 20))
+        max_lwi = int(min_lwi + round((dist_in_km/1E6) * 50)) # 50sec/1000 km. 
         min_lwf = int(max_lwi)
-        max_lwf = int(min_lwf + round((DS/1E6) * 60)) # 60 sec per 1000 km.
+        max_lwf = int(min_lwf + round((dist_in_km/1E6) * 60)) # 60sec/1000 km.
     elif is_local == 'local':
         min_pw = int(arriv_p)
         max_pw = int(min_pw + 20)
         min_sw = int(arriv_s - 5)
         max_sw = int(min_sw + 20)
-        min_lwi = int(round(surf_tts(DS, init_sec) + 20))
+        min_lwi = int(round(surf_tts(dist_in_km, init_sec) + 20))
         max_lwi = int(min_lwi + 50)
         min_lwf = int(max_lwi)
         max_lwf = int(min_lwf + 80)
@@ -799,7 +760,7 @@ def time_windows(DS, arriv_p, arriv_s, init_sec, is_local):
         max_pw = int(min_pw + 7)
         min_sw = int(arriv_s)
         max_sw = int(min_sw + 7)
-        min_lwi = int(round(surf_tts(DS, init_sec) + 5))
+        min_lwi = int(round(surf_tts(dist_in_km, init_sec) + 5))
         max_lwi = int(min_lwi + 12)
         min_lwf = int(max_lwi)
         max_lwf = int(min_lwf + 80)
@@ -815,23 +776,21 @@ def time_windows(DS, arriv_p, arriv_s, init_sec, is_local):
     #             'latter_surface_start': min_lwf,
     #             'latter_surface_end': max_lwf}
 
-
     return min_pw, max_pw, min_sw, max_sw, min_lwi, max_lwi, min_lwf, max_lwf
 
 
-def surf_tts(distance, start_time):
+def surf_tts(ds_in_km, start_time):
 
     """
     Uses arrival times for different epicentral distances based on the IASP91
-    travel times model to estimate a curve of travel times for surface waves
-    and get the arrival time of the surface waves of the event. Inputs are the
-    epicentral distance in degrees and the event start time in seconds.
+    travel times model to estimate a curve of travel times for surface waves.
+    Returns the arrival time of the surface waves
 
     :type distance: float
     :param distance: Epicentral distance in degrees between earthquake source
         and receiver station.
     :type start_time: float
-    :param start_time: Starttime of the event in the fetched seismogram.
+    :param start_time: Start time of the event.
     :rtype arrival: float
     :return arrival: Arrival time of the surface waves of the event.
     """
@@ -846,7 +805,7 @@ def surf_tts(distance, start_time):
     surftts = mval * np.arange(0., 180.1, 0.01)
     difer = []
     for i4 in range(0, len(surftts)):
-        dife_r = abs(0.001 * distance / 111.11 - np.arange(0., 180.1, 0.01)
+        dife_r = abs(0.001 * ds_in_km / 111.11 - np.arange(0., 180.1, 0.01)
                      [i4])
         difer.append(dife_r)
     # love wave arrival: event time + surftts for closest degree??
@@ -862,33 +821,28 @@ def surf_tts(distance, start_time):
     # arrival = love wave arrival - p arrival?
     peq = surftts[np.asarray(difer).argmin()] - \
         tts[np.asarray(diferans).argmin()]
-    arrival = arriv_lov + peq
+    sw_arrival = arriv_lov + peq
 
-    return arrival
+    return sw_arrival
 
 
 def get_corrcoefs(streamA, streamB, sec):
 
     """
-    Calculates the zero-lag correlation coefficients between two streams
+    Calculates the zero-lag correlation coefficients between two streams in 
+    small time windows, whose length is dictated by the 'sec' parameter
     *StreamA and StreamB data lengths need to be the same.
 
-    :type rt: :class: `~obspy.core.trace.Trace`
-    :param rt: Trace of the rotational data from ringlaser.
-    :type rodat: numpy.ndarray
-    :param rodat: Rotational data ...
-    :type acstr: :class: `~obspy.core.stream.Stream`
-    :param acstr: Three component broadband station signal.
-    :type rotate_array: numpy.ndarray
-    :param rotate_array:
+    :type streamA: :class: `~obspy.core.stream.Stream`
+    :param streamA: First stream to correlate
+    :type streamB: :class: `~obspy.core.stream.Stream`
+    :param streamB: Second stream to correlate
     :type sec: int
     :param sec: Time window length.
-    :type station: str
-    :param station: Station from which data are fetched (i.e. 'RLAS').
     :rtype corrcoefs: numpy.ndarray
     :return corrcoefs: Correlation coefficients.
     :rtype thres: numpy.ndarray
-    :return thres: Array for plotting dashed line of 75'%' correlation.
+    :return thres: Array for plotting dashed line of 75% correlation.
     """
 
     # time window in samples
@@ -912,33 +866,26 @@ def get_corrcoefs(streamA, streamB, sec):
 def baz_analysis(rt, ac, sec):
 
     """
-    Backazimuth analysis: Computes the correlation coefficients for
-    the backazimuth and backazimuth values.
-    For each time window, loop through all backazimuth values, calculate 
-    correlations for each backazimuth, iterate over entire trace time
-    *streamA and streamB need to be the same length
+    Computes correlation coefficients for varying backazimuth steps.
+    Loops over BAz values from 0 to 360 in steps, for each BAz value, calculates
+    correlations of rotation rate and tranvserse acceleration in small time 
+    windows, whose length is controlled by the parameters 'sec'.
+    *Data length of rt and ac need to be the same 
 
-    :type rt: :class: `~obspy.core.trace.Trace`
-    :param rt: Trace of the rotational data from ringlaser.
-    :type rodat: numpy.ndarray
-    :param rodat: Rotational data ...
-    :type acstr: :class: `~obspy.core.stream.Stream`
-    :param acstr: Three component broadband station signal.
+    :type rt: :class: `~obspy.core.stream.Stream`
+    :param rt: Stream of the rotation data.
+    :type ac: :class: `~obspy.core.stream.Stream`
+    :param ac: Stream of translation data.
     :type sec: int
     :param sec: Time window length.
-    :type corrcoefs: numpy.ndarray
-    :param corrcoefs: Correlation coefficients.
-    :type ind: int
-    :param ind: Index for stream data selection.
-    :type station: str
-    :param station: Station from which data are fetched (i.e. 'RLAS').
-    :rtype corrbaz: numpy.ndarray
-    :return corrbaz: Correlation coefficients for each backazimuth.
-    :rtype maxcorr: numpy.ndarray
-    :return maxcorr: Backazac_pimuth values for maximum correlation for each time
-        window.
+    :rtype corrbaz_list: numpy.ndarray
+    :return corrbaz_list: Array of correlation coefficients per backazimuth step
+    :rtype maxcorr_list: numpy.ndarray
+    :return maxcorr_list: BAz values for the maximum correlation per time window 
     :rtype backas: numpy.ndarray
-    :return backas: Vector containing backazimuths (step: 10°).
+    :return backas: Vector containing backazimuths values by step length
+    :rtype coefs_list: list
+    :return coefs_list: List of the max correlation value for each time window.
     """
 
     # time window in samples
@@ -956,10 +903,10 @@ def baz_analysis(rt, ac, sec):
         for j in range(0, corr_length):
             rotate_tmp = ac.copy()
             rotate_tmp.rotate(method='NE->RT', back_azimuth = BAZ)
-            trv_acc = rotate_tmp.select(component='T')
+            trv_acc_tmp = rotate_tmp.select(component='T')
 
             corrbaz = correlate(a = rt[0].data[j*rt_TW:(j+1)*rt_TW],
-                                b = trv_acc[0].data[j*ac_TW:(j+1)*ac_TW],
+                                b = trv_acc_tmp[0].data[j*ac_TW:(j+1)*ac_TW],
                                 shift = 0)
             corrbaz_list.append(corrbaz[0])
 
@@ -981,26 +928,28 @@ def baz_analysis(rt, ac, sec):
     return corrbaz_list, maxcorr_list, backas, coefs_list
 
 
-def estimate_baz(rt, ac, start_sw, end_sw, station):
+def estimate_baz(rt, ac, start, end):
+
     """
-    Calculates the sum of all correlation coefficients above a certain
-    threshold (0.9) within S-waves and surface waves for each backazimuth.
+    Estimate the backazimuth of an event by taking the average of all BAz's 
+    which give a correlation greater than 0.9 in the s-wave and surface waves
 
     :type rt: :class: `~obspy.core.stream.Stream`
     :param rt: Rotational signal from ringlaser.
     :type ac: :class: `~obspy.core.stream.Stream`
-    :param ac: Three component broadband station signal.
-    :type min_sw: float
-    :param min_sw: Starttime for S-waves window.
-    :type max_lwf: float
-    :param max_lwf: Endtime for latter surface waves window.
-    :type station: str
-    :param station: Station from which data are fetched (i.e. 'RLAS').
-    :rtype corrsum: list of floats
-    :return corrsum: Sum of all correlation coefficients above a certain
-        threshold (0.9) within S-waves and surface waves for each backazimuth.
+    :param ac: Three component broadband translation
+    :type start: float
+    :param start: Starttime for S-waves window.
+    :type end: float
+    :param end: Endtime for latter surface waves window.
+    :rtype corrsum_list: list of floats
+    :return corrsum_list: Sum of all corr. coefficients above 0.9, start to end
     :rtype baz_list: numpy.ndarray
-    :return baz_list: Vector containing backazimuths (step: 1°).
+    :return baz_list: Vector containing backazimuths by step length
+    :rtype max_ebaz_xcoefs: numpy.ndarray
+    :return max_ebaz_xcoefs: Array of maximum correlations for each est. BAz
+    :rtype EBA: float
+    :return EBA: The estimated BAz if applicable, else NaN
     """
 
     # set integer sampling rates
@@ -1013,8 +962,8 @@ def estimate_baz(rt, ac, start_sw, end_sw, station):
     ac_TW = sec_internal * ac_SR
 
     # sample number of surface wave start/end
-    start_sample = start_sw * rt_SR
-    end_sample = end_sw * ac_SR
+    start_sample = start * rt_SR
+    end_sample = end * ac_SR
 
     # cut streams at surface waves
     rt_cut = rt[0].data[start_sample:end_sample]
@@ -1054,7 +1003,7 @@ def estimate_baz(rt, ac, start_sw, end_sw, station):
         bazsum = sum(bazsum)
         corrsum_list.append(bazsum)
 
-    # Determine estimated Backazimuth
+    # determine estimated backazimuth
     best_ebaz = baz_list[np.asarray(corrsum_list).argmax()] 
     max_ebaz_xcoef = np.max(corr_list[int(best_ebaz)]) 
 
@@ -1066,39 +1015,28 @@ def estimate_baz(rt, ac, start_sw, end_sw, station):
     return corrsum_list, baz_list, max_ebaz_xcoef, EBA
 
 
-def get_phase_vel(rt, trv_acc, sec, corrcoefs, surf_start, band_check):
+def get_phase_vel(rt, trv_acc, sec, corrcoefs, start):
 
     """
-    Calculates the phase velocities and the estimated backazimuth.
+    Calculate phase velocities by taking amplitude ratios, only for 
+    correlation values > 0.75. 'start' controls where in data calculations begin
 
     :type rt: :class: `~obspy.core.stream.Stream`
     :param rt: Rotational signal from ringlaser.
+    :type rt: :class: `~obspy.core.stream.Stream`
+    :param rt: Tranvserse acceleration stream.
     :type sec: int
     :param sec: Time window length.
     :type corrcoefs: numpy.ndarray
-    :param corrcoefs: Correlation coefficients.
-    :type rotate: :class: `~obspy.core.stream.Stream`
-    :param rotate: Stream object of the broadband station signal with
-        rotated horizontal components.
-    :type corrsum: list of floats
-    :param corrsum: Sum of all correlation coefficients above a certain
-        threshold (0.9) within S-waves and surface waves for each backazimuth.
-    :type baz_list: numpy.ndarray
-    :param baz_list: Vector containing backazimuths (step: 1°).
-    :rtype phasv: numpy.ndarray
-    :return phasv: Phase velocities of the seismic signal.
-    :rtype EBA: float
-    :return EBA: Estimated backazimuth.
+    :param corrcoefs: Calculated correlation coefficients.
+    :type start: int
+    :param start: index from which to start calculations
+    :rtype phasv_list: numpy.ndarray
+    :return phasv_list: Calculated phase velocities
     """
     # time window in samples
     rt_TW = int(rt[0].stats.sampling_rate * sec)
     trv_TW = int(trv_acc[0].stats.sampling_rate * sec)
-
-    # if dealing with freq bands, start at ind_surf
-    if band_check:  
-        start = surf_start
-    elif not band_check:
-        start = 0
 
     # calculate phase velocity (km/s) for correlations >= 0.75
     phasv_list = []
@@ -1117,15 +1055,12 @@ def get_phase_vel(rt, trv_acc, sec, corrcoefs, surf_start, band_check):
     return phasv_list
 
 
-def sn_ratio(full_signal, p_arrival, sampling_rate):
+def sn_ratio(stream, p_arrival):
 
     """
-    Characterizes the signal-to-noise ratio of the event(s) as the ratio of
-    the peak amplitude of the whole wave train and the mean amplitude in a
-    noise window before the first theoretical arrival, assuming that the noise
-    has the same behavior in all the data. The inputs are the data, the
-    theoretical time of the first P-arrival (as seconds after the first sample
-    of the fetched data) and the sampling rate.
+    Characterizes the signal-to-noise ratio as the ratio of max amplitude and 
+    the average signal value in the noise window before the first theoretical 
+    p-wave arrival, assuming that the noise has the same behavior everywhere. 
 
     :type full_signal: numpy.ndarray
     :param full_signal: Amplitude data of the full signal.
@@ -1136,51 +1071,55 @@ def sn_ratio(full_signal, p_arrival, sampling_rate):
     :rtype SNR: float
     :return SNR: Signal-to-noise ratio of the seismogram.
     """
-    SR = int(sampling_rate)
+    # convert to integers for indexing
+    str_SR = int(stream[0].stats.sampling_rate)
     p_arrival = int(round(p_arrival))
 
-    tr_sign = max(full_signal)
-    tr_noise = abs(np.mean(full_signal[SR * (p_arrival - 180): 
-                                       SR * (p_arrival - 100)]))
-    
-    SNR = tr_sign/tr_noise
+    # determine signal max and noise value
+    noise_data = stream[0].data[(p_arrival-180)*str_SR:(p_arrival-100)*str_SR]
+    noise_mean = abs(np.mean(noise_data))
+    data_max = max(stream[0].data)
+
+    SNR = data_max/noise_mean
 
     return SNR
 
 
-def store_info_json(rt, ac, trv_acc, corrcoefs, dist_baz, arriv_p, EBA, station, 
-                    phasv_means, phasv_stds, startev, event, data_sources, 
-                    depth, max_ebaz_xcoef, folder_name, tag_name):
+def store_info_json(rt, ac, trv_acc, data_sources, station, event, dist_baz, 
+                    arriv_p, corrcoefs, EBA, max_ebaz_xcoef, 
+                    phasv_means, phasv_stds, folder_name, tag_name):
 
     """
-    Generates a human readable .json file that stores data for each event,
-    like peak values (acceleration, rotation rate,
-    zero-lag correlation coefficient), signal-to-noise ratio, backazimuths.
+    Generates a human readable .json file to store processed data for each event
 
-    :type rotate: :class: `~obspy.core.stream.Stream`
-    :param rotate: Stream object of the broadband station signal with
-        rotated horizontal components.
-    :type ac: :class: `~obspy.core.stream.Stream`
-    :param ac: Three component broadband station signal.
     :type rt: :class: `~obspy.core.stream.Stream`
     :param rt: Rotational signal from ringlaser.
-    :type corrcoefs: numpy.ndarray
-    :param corrcoefs: Correlation coefficients.
-    :type baz: tuple
-    :param baz: [0] Great circle distance in m, 
+    :type ac: :class: `~obspy.core.stream.Stream`
+    :param ac: Three component broadband translations
+    :type trv_acc: :class: `~obspy.core.stream.Stream`
+    :param trv_acc: Transverse acceleration stream
+    :type data_sources: dictionary
+    :param data_sources: collection of data source for each channel.
+    :type station: str
+    :param station: Station of interest.
+    :type event: :class: `~obspy.core.event.event.Event`
+    :param event: Event information container
+    :type dist_baz: tuple
+    :param dist_baz: [0] Great circle distance in m, 
                 [1] azimuth A->B in degrees,
                 [2] backazimuth B->A in degrees.
     :type arriv_p: float
-    :param arriv_p: Arrival time of the first P-wave.
+    :param arriv_p: P-wave first arrival time.
+    :type corrcoefs: numpy.ndarray
+    :param corrcoefs: Correlation coefficients.
     :type EBA: float
     :param EBA: Estimated backazimuth.
-    :phasv_means
-    :type station: str
-    :param station: Station from which data are fetched (i.e. 'RLAS').
-    :type srcRT: str
-    :param station: Data source for RoTations
-    :type srcTR: str
-    :param srcTR: Data source for TRanslations
+    :type max_ebaz_xcoef: numpy.ndarray
+    :return max_ebaz_xcoefs: Array of maximum correlations for each est. BAz
+    :type phasv_means: numpy.ndarray
+    :param phasv_means: Vector of mean phase velocities per freq. band
+    :type phasv_std: numpy.ndarray
+    :param phasv_std: Vector of phase velocities std. per freq. band
     :type folder_name: string
     :param folder_name: Name of the folder containing the event.
     :type tag_name: string
@@ -1202,8 +1141,8 @@ def store_info_json(rt, ac, trv_acc, corrcoefs, dist_baz, arriv_p, EBA, station,
     MXE = round(max_ebaz_xcoef, rnd) # Max correlation for Estimated BAz
     DS_KM = round(0.001 * dist_baz[0], rnd) # Epicentral Distance [km]
     DS_DEG = round(DS_KM / 111.11, rnd) # Epicentral Distance [°]
-    SNT = round(sn_ratio(ac[0].data, arriv_p, ac[0].stats.sampling_rate), rnd) 
-    SNR = round(sn_ratio(rt[0].data, arriv_p, rt[0].stats.sampling_rate), rnd)
+    SNT = round(sn_ratio(ac, arriv_p), rnd)
+    SNR = round(sn_ratio(rt, arriv_p), rnd)
 
     phasv_means = [round(_,rnd) for _ in phasv_means] 
     phasv_stds = [round(_,rnd) for _ in phasv_stds] 
@@ -1214,12 +1153,12 @@ def store_info_json(rt, ac, trv_acc, corrcoefs, dist_baz, arriv_p, EBA, station,
                 ('event_source', catalog),
                 ('event_latitude', orig.latitude),
                 ('event_longitude', orig.longitude),
-                ('origin_time', str(startev)),
-                ('trace_start', str(startev-180)),
-                ('trace_end', str(startev+3*3600)),
+                ('origin_time', str(orig.time)),
+                ('trace_start', str(orig.time-180)),
+                ('trace_end', str(orig.time+3*3600)),
                 ('magnitude', magnitude.mag),
                 ('magnitude_type', magnitude.magnitude_type),
-                ('depth', depth),
+                ('depth', orig.depth * 0.001),
                 ('depth_unit', 'km')
                 ])
 
@@ -1376,9 +1315,11 @@ def store_info_xml(event,folder_name,tag_name,station):
     """
     Write QuakeML file. Store extra parameters under the namespace rotational
     seismology. Stations are taken care of in nested tags in the extra tag
-    of the xml file. Parameters used for filtering events on the JANE database
-    framework, taken from .json file 
+    of the XML file. Parameters used for filtering events on JANE database 
+    framework are taken from the previously written .json file 
 
+    :type event: :class: `~obspy.core.event.event.Event`
+    :param event: Event information container
     :type folder_name: string
     :param folder_name: Name of the folder containing the event.
     :type tag_name: string
@@ -1428,39 +1369,39 @@ def store_info_xml(event,folder_name,tag_name,station):
                             r"http://www.rotational-seismology.org"})
 
 
-
 def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
 
     """
-    Compares vertical rotation rate and transversal acceleration through
-    direct waveform comparison in different time windows and through cross-
-    correlation analysis. It also stores some values obtained through the
-    routine, like peak values (signal amplitudes, correlation coefficients)
-    and signal-to-noise ratios
-
-    :type event: :class: `~obspy.core.event.Event`
-    :param event: Contains the event information.
+    Main processing script, calls all other functions defined above.
+    Compare vertical rotation rate and transversal acceleration through
+    direct waveform comparison in different through cross-correlation analysis. It also stores some values obtained through the
+    Creates and saves four figures, a .json file with processed parameters,
+    and a QuakeML file for each event.
+ 
+    :type event: :class: `~obspy.core.event.event.Event`
+    :param event: Event information container
     :type station: str
     :param station: Station from which data are fetched (i.e. 'RLAS').
     :type link: string
-    :param link: Link to the Iris-xml, where event and moment tensor data are
-        fetched.
+    :param link: URL to the IRIS-XML file
     :type mode: str
-    :param mode: Defines where data fetched from
+    :param mode: Determines if moment tensor information is fetched
     :type folder_name: string
     :param folder_name: Name of the folder containing the event.
     :type tag_name: string
     :param tag_name: Handle of the event.
     """
-
-    # gather event information, stream obsjects etc.
+    # =========================================================================
+    #                                   
+    #              Gather event information, stream objects etc.
+    #
+    # =========================================================================
     event_lat, event_lon, depth, startev, rt, ac, dist_baz, data_sources = \
-        event_info_data(event, station, mode, polarity, instrument)
+        event_info_data(event, station, polarity, instrument)
     
-    # distance in km, backazimuth in deg
+    # parse out event and station location information
     DS = dist_baz[0]
     BAz = dist_baz[2]
-
     station_lat = rt[0].stats.coordinates.latitude
     station_lon = rt[0].stats.coordinates.longitude
 
@@ -1472,16 +1413,17 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
         reg = False
     
     if link != 'blank':
-        MomentTensor, Magnitude, Region = get_moment_tensor_magnitude(link)
+        moment_tensor, mt_magnitude, mt_region = get_moment_tensor(link)
 
     # =========================================================================
-    #                                   PAGE 1
+    #                                   
+    #                                  PAGE 1
     #               Create map with event location & information
     #
     # =========================================================================
     print("\nPage 1 > Title Card...", end=" ")
 
-    if is_local(DS) == 'non-local': 
+    if is_local(DS) == 'far': 
         if DS <= 13000000:
             plt.figure(figsize=(18, 9))
             plt.subplot2grid((4, 9), (0, 4), colspan=5, rowspan=4)
@@ -1555,12 +1497,11 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
     map.drawgreatcircle(event_lon, event_lat, station_lon, station_lat, 
                                                     linewidth=3, color='yellow')
 
-    # add beachballs for the event and station triangle
     if station == 'RLAS':
         x, y = map(event_lon, event_lat)
         statlon, statlat = map(station_lon, station_lat)
 
-        if is_local(DS) == 'non-local':
+        if is_local(DS) == 'far':
             map.scatter(statlon, statlat, 200, color="b", marker="v",
                                                      edgecolor="k", zorder=100)
             plt.text(statlon + 200000, statlat, station, va="top",
@@ -1569,14 +1510,15 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
             map.scatter(x, y, 200, color="b", marker="*", edgecolor="k", 
                                                                     zorder=100)
 
+            # add beachballs for the event and station triangle, if mode == link
             if mode == 'link':
                 plt.subplot2grid((4, 9), (1, 0), colspan=2)
-                plt.title(u'Event: %s \n %s \n \n' % (startev, Region),
+                plt.title(u'Event: %s \n %s \n \n' % (startev, mt_region),
                                                     fontsize=20, weight='bold')
                 ax = plt.gca()
                 ax.axis('equal')
                 ax.axis('off')
-                b = Beach(MomentTensor, xy=(0.5, 0.5), facecolor='blue',
+                b = beach(moment_tensor, xy=(0.5, 0.5), facecolor='blue',
                                             width=0.5, linewidth=1, alpha=1.0)
                 b.set_zorder(200)
                 ax.add_collection(b)
@@ -1631,6 +1573,7 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
                 ax = plt.gca()
                 ax.axis('off')
 
+        # close and local events
         else:
             map.scatter(statlon, statlat, 200, color="b", marker="v",
                                                     edgecolor="k", zorder=100)
@@ -1642,12 +1585,12 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
 
             if mode == 'link':
                 plt.subplot2grid((4, 9), (1, 0), colspan=2)
-                plt.title(u'Event: %s \n %s \n \n' % (startev, Region),
+                plt.title(u'Event: %s \n %s \n \n' % (startev, mt_region),
                           fontsize=20, weight='bold')
                 ax = plt.gca()
                 ax.axis('equal')
                 ax.axis('off')
-                b = Beach(MomentTensor, xy=(0.5, 0.5), facecolor='blue',
+                b = beach(moment_tensor, xy=(0.5, 0.5), facecolor='blue',
                                             width=0.5, linewidth=1, alpha=1.0)
                 b.set_zorder(200)
                 ax.add_collection(b)
@@ -1713,7 +1656,7 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
             plt.text(statlon + 27000, statlat, station, fontsize=18, va="top",
                                 family="monospace", weight="bold", zorder=101,
                                  color='k', backgroundcolor='white')
-        elif is_local(DS) == 'non-local':
+        elif is_local(DS) == 'far':
             map.scatter(x, y, 200, color="b", marker="*", edgecolor="k",
                                                                      zorder=100)
             map.scatter(statlon, statlat, 300, color="b", marker="v",
@@ -1767,18 +1710,21 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
                                                     is_local(DS), rt, ac)
 
     print("Removing instrument response...")
+    # remove instrument response based on station
     rt, ac, rt_pcoda, ac_pcoda = remove_instr_resp(
                                     rt, ac, rt_pcoda, ac_pcoda,station, startev)
 
     print("Filtering and rotating traces...")
-    # filter raw data, rotate some to theoretical backazimuth
-    rt_bands, trv_bands, rotate, rt_pcoda_coarse, trv_pcoda, trv_pcoda_coarse,\
-    pcoda_rotate_coarse, filt_rt_pcoda, filt_ac_pcoda, filt_trv_pcoda  = filter_and_rotate(
-    ac, rt, BAz, rt_pcoda, ac_pcoda, cutoff, cutoff_pc, station, is_local(DS))
+    # filter raw data, rotate some to theoretical backazimuth, separate Pcoda
+    trv_acc, trv_pcoda, rt_bands, trv_bands, rt_pcoda_coarse, trv_pcoda_coarse,\
+    filt_rt_pcoda, filt_ac_pcoda, filt_trv_pcoda = filter_and_rotate(
+                    rt, ac, rt_pcoda, ac_pcoda, cutoff, cutoff_pc, is_local(DS))
 
     print("Getting theoretical arrival times...")
-    # find event start and theoretical arrival times for seismics phases
+    # find trace start
     init_sec = startev - ac[0].stats.starttime
+
+    # theoretical arrival times for seismics phases
     arriv_p, arriv_s = ps_arrival_times(DS, depth, init_sec)
     min_pw, max_pw, min_sw, max_sw, min_lwi, max_lwi, min_lwf, max_lwf = \
                     time_windows(DS, arriv_p, arriv_s, init_sec, is_local(DS))
@@ -1790,9 +1736,6 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
     #
     # =========================================================================    
     print("\nPage 2 >  Waveform Comparison...",end=" ")
-
-    # separate transverse acceleration from rotated traces
-    trv_acc = rotate.select(component='T')
 
     # rt.taper(max_percentage=0.05) # this was here but we already taper?
     c1 = .5 * max(abs(trv_acc[0].data)) / max(abs(rt[0].data))  # vel in m/s
@@ -1811,10 +1754,13 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
         '[1/s]', fontweight='bold', fontsize=13)
     plt.xlim(0, rt[0].stats.delta * len(rt[0].data))
     plt.ylim(min(rt[0].data), fact1 + max((1. / (2. * c1)) * trv_acc[0].data))
-    box_yposition = ((fact1 + max((1. / (2. * c1)) * trv_acc[0].data))
-                     - abs(min(rt[0].data)))/2  # box is in middle of figure
     
-    if is_local(DS) == 'non-local':  # gap between annotation and vline
+    # place box in middle of figure
+    box_yposition = ((fact1 + max((1. / (2. * c1)) * trv_acc[0].data))
+                     - abs(min(rt[0].data)))/2  
+    
+    # gap between annotation and vertical
+    if is_local(DS) == 'far':  
         xgap = 50
     else:
         xgap = 15
@@ -1983,22 +1929,19 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
                                                     rt, ac, sec)
 
     # estimate backazimuth and correlations for given BAz
-    print("Estimating best backazimuth value...")
+    print("Estimating best backazimuth values...")
     corrsum, baz_list, max_ebaz_xcoef, EBA = estimate_baz(
-                                        rt, ac, min_sw, max_lwf, station)
+                                        rt, ac, min_sw, max_lwf)
 
     print("Calculating phase velocities...")
-
-    # calculate phase velocities starting at surface wave arrivals 
-    surf_start = min_lwi // sec
-    phasv = get_phase_vel(
-                    rt, trv_acc, sec, corrcoefs, surf_start, band_check=False)
+    phasv = get_phase_vel(rt, trv_acc, sec, corrcoefs, start=0)
     
-    # calculate phase velocities for different frequency bands, 1-8
+    # calculate phase velocities for different frequency bands
+    surf_start = min_lwi // sec
     phasv_bands,phasv_means,phasv_stds = [],[],[]
     for i in range(len(rt_bands)):
         phasv_tmp = get_phase_vel(rt_bands[i], trv_bands[i], seconds_list[i],
-                                corrcoefs_bands[i], surf_start, band_check=True)
+                                        corrcoefs_bands[i], start=surf_start)
         
         # filter out NaNs and append to list
         phasv_bands.append(phasv_tmp[~np.isnan(phasv_tmp)])
@@ -2116,7 +2059,6 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
     #                                P-Coda analysis
     #
     # ========================================================================= 
-    
     print("Analyzing rotations in the P-coda")
     
     # Zero-lag correlation coefficients
@@ -2138,25 +2080,23 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
     trv_pcoda_cut = filt_trv_pcoda.copy()
 
     rt_pcoda_cut[0].data = filt_rt_pcoda[0].data[0:lwi_average * rt_pc_SR]
+    trv_pcoda_cut[0].data = trv_pcoda_cut[0].data[0:lwi_average * ac_pc_SR]
     for i in range(3):
         ac_pcoda_cut[i].data = filt_ac_pcoda[i].data[0:lwi_average * ac_pc_SR]
-    trv_pcoda_cut[0].data = trv_pcoda_cut[0].data[0:lwi_average * ac_pc_SR]
+    
     for traces in [rt_pcoda_cut,ac_pcoda_cut,trv_pcoda_cut]:
         traces.taper(max_percentage=0.05)
 
-
     # find correlations
-    corrcoefs_p, thres_p = get_corrcoefs(
-                                    rt_pcoda_cut, trv_pcoda_cut, sec_p)
+    corrcoefs_p, thres_p = get_corrcoefs(rt_pcoda_cut, trv_pcoda_cut, sec_p)
 
     print("Backzimuth...")
-
     # surface wave start sample
     max_lwi_ac = ac_pc_SR * max_lwi
 
     # analyze backazimuth
     corrbaz_p, maxcorr_p, backas_p, max_coefs_10deg_p = baz_analysis(
-                                    rt_pcoda_cut, ac_pcoda_cut, sec_p) # AC!!
+                                            rt_pcoda_cut, ac_pcoda_cut, sec_p)
 
     # set up arrays for plotting
     time_p = rt_pcoda_cut[0].stats.delta * np.arange(0, len(rt_pcoda[0].data))
@@ -2165,6 +2105,7 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
     c1_p = .5 * (max(abs(trv_pcoda[0].data[0:max_lwi_ac])) /
                  max(abs(rt_pcoda[0].data[0:max_lwi_ac])))
 
+    # check for correlations >= 0.5
     maxcorr_p_list = []
     for m in range(0, len(maxcorr_p)):
         if np.max(corrbaz_p[:,m]) >= 0.5:
@@ -2255,7 +2196,6 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
     cb1.set_ticks([-1.0,-0.75,-0.5,-0.25,0.0,0.25,0.5,0.75,1.0])
    
     # ============================= Save Figure ============================== 
-
     plt.savefig(
         os.path.join(folder_name,tag_name + '_{}_page_4.png'.format(station)))
     plt.close()
@@ -2268,9 +2208,9 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
     # ========================================================================= 
     print("\n>> Storing event information in JSON and XML files...",end=" ")
     
-    store_info_json(rt, ac, trv_acc, corrcoefs, dist_baz, arriv_p, EBA, station, 
-                    phasv_means, phasv_stds, startev, event, data_sources, 
-                    depth, max_ebaz_xcoef, folder_name, tag_name)
+    store_info_json(rt, ac, trv_acc, data_sources, station, event, dist_baz, 
+                    arriv_p, corrcoefs, EBA, max_ebaz_xcoef, phasv_means, 
+                    phasv_stds, folder_name, tag_name)
 
     store_info_xml(event,folder_name,tag_name,station)
 
@@ -2281,6 +2221,7 @@ def generate_tags(event):
 
     """
     Generates all naming schema tags for an event and prints dialog as it does
+
     :type event: :class: `~obspy.core.event.Event`
     :param event: Contains the event information.
     :rtype tag_name: str
@@ -2550,7 +2491,5 @@ if __name__ == '__main__':
             for i in error_list:
                 f.write('{}\n'.format(i))
 
-
-
-# DEBUGGER
+# Debugger (* paste in wherever you want to break the code)
 # import pdb; pdb.set_trace()
