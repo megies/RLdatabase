@@ -2180,7 +2180,7 @@ def plot_waveform_comp(event, station, link, mode, folder_name, tag_name):
     #               Cross correlations for P-Coda time window
     #
     # ========================================================================= 
-
+    import pdb;pdb.set_trace()
     # P-coda limits
     xlim1 = rt[0].stats.delta * len(rt[0].data) 
     Xp, Yp = np.meshgrid(np.arange(0,sec_p * len(corrcoefs_p), sec_p), backas_p)
