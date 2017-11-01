@@ -2,23 +2,24 @@
 # -*- coding: utf-8 -*-
 
 """
-ROTATIONAL SEISMOLOGY ROUTINES. Following the theory and assuming a
-transversely polarized plane wave, this script compares the transverse 
-acceleration and vertical rotation rate of an event through:
+ROTATIONAL SEISMOLOGY ROUTINES. 
+Following the theory and assuming atransversely polarized plane wave, 
+this script compares the transverse acceleration and vertical rotation 
+rate of an event through:
 
-1) direct waveform comparison in different time windows (P-coda, S-waves and
-surface waves) using broadband data from WET (Wettzell) station for 
-acceleration and from Wettzell ringlaser (RLAS station) for the vertical
-rotation rate.
+1) direct waveform comparison for different seismic phases (P-coda, S-waves and
+surface waves) between transverse acceleration from a broadband 3-component
+translation sensor, and vertical rotation rate measured by rotation instruments
 
 2) zero-lag cross-correlation analysis of the waveforms using the theoretical
-backazimuth of the event. Aside from the correlation-coefficients, it returns
-the local horizontal phase velocity for the time windows with a correlation
-factor larger than 0.75. It also preforms correlation analysis for different
-azimuths and estimates the backazimuth from the one that has the highest
-correlation coefficients.
+backazimuth (BAz) of the event. 
 
-Additionally, the routine generates:
+3) calculation of local horizontal phase velocity for small time windows,
+which show correlation coefficients larger than 0.75. 
+
+4) estimate of BAz by taking correlations at every value of 0 < BAz < 360 
+
+The routine generates as OUTPUT:
 
 + a QuakeML (.xml) file that stores data for each event, and contains an extra 
 tag with rotational parameters, to be used in the JANE format database
@@ -26,21 +27,35 @@ tag with rotational parameters, to be used in the JANE format database
 + a human readable (.json) ordered dictionary text file that contains both
 event and station information, as well as output data results from processing
 
++ 4 images showing waveform compariosn, correlations, phase velocities and 
+analysis of rotations in he P-Coda time window
+
 Extra Information:
 
-+ QuakeML files can be read in directly, for example to pull events from other 
-catalogs (ISC, ...) by setting: --mode qmlfile
++ quakeML input files can be read directly. Useful for pulling events from other 
+catalogs (ISC, ...), Accomplished by setting: --mode iscquakeml
 
-+ Events can be chosen from the IRIS FDSN catalog, which is usually faster
++ default --mode fetches data from the GCMT New Quick catalog or a local .NDK
+
++ events can be fetched from IRIS FDSN webservice, which is usually faster
 and more abundant especially for older events. Set: --mode iris
 
-+ Non-local events are bandstoppped for the secondary microseism (5-12s) 
++ non-local events bandstoppped for secondary microseism frequencies (5-12s) 
 
-+ maximum correlation coefficients for the estimated BAz are added on page 3.3
++ only 0.5 hour recordings shown for local and close events
 
-+ only 0.5 hour recordings shown for local and close events!
+Running The Script:
 
-+ P-coda windows (sec_p) now shorter for local and close events (2s).
+# fetch data from available sources (archive if working internally or FDSN 
+# webservice if external) for the past week, process and produce output
+>>> python waveformCompare.py 
+
+# call arguments to choose event parameters such as magnitude and time
+>>> python waveformCompare.py --min_magnitude 6 --max_magnitude 7
+
+# i.e. to get the M9.1 2011 Tohoku-Oki earthquake
+>>>python waveformCompare.py --min_magnitude 9 --min_datetime 2011-01-01T00:00 \
+--mode iris
 
 """
 import os
@@ -139,18 +154,21 @@ def download_data(origin_time, instrument_id, source):
             data_source = 'Archive'
             if origin_time.hour > 21:
                 st = Stream()
-                st.extend(read(filePath, starttime = origin_time - 180,
-                      endtime = origin_time + 3 * 3600))
-                st.extend(read(filePath2, 
-                      starttime = UTCDateTime(o_time2.year, o_time2.month, 
-                                                            o_time2.day, 0, 0),
-                      endtime = origin_time + 3 * 3600))
+                st.extend(read(pathname_or_url = filePath, 
+                               starttime = origin_time - 180,
+                               endtime = origin_time + 3 * 3600))
+                st.extend(read(pathname_or_url = filePath2, 
+                               starttime = UTCDateTime(origin_time2.year,
+                                                       origin_time2.month,  
+                                                       origin_time2.day, 0, 0),
+                               endtime = origin_time + 3 * 3600))
                 st.merge(method=-1)
             else:
-                st = read(filePath, starttime = origin_time - 180,
-                                    endtime = origin_time + 3 * 3600)    
+                st = read(pathname_or_url = filePath, 
+                          starttime = origin_time - 180,
+                          endtime = origin_time + 3 * 3600)    
         else:
-            print("\tFile not found: \n\t %s \n" % filePath)    
+            print("\tFile not found: \n\t {} \n".format(filePath))    
     
     # if data/path does not exist, try querying FDSN webservices
     elif (not dataDir_get) or (not st):
@@ -168,8 +186,7 @@ def download_data(origin_time, instrument_id, source):
         data_source = S 
     
     if not st:
-        raise RotationalProcessingException(
-                                        "Data not available for this event")
+        raise RotationalProcessingException("Data not available for this event")
 
     # trim full waveform around event
     st.trim(starttime=origin_time-180, endtime=origin_time+3*3600)
@@ -279,7 +296,7 @@ def event_info_data(event, station, polarity, instrument):
     event_lon = origin.longitude
     depth = origin.depth * 0.001  # Depth in km
     dist_baz = gps2dist_azimuth(lat1 = event_lat, lon1 =  event_lon, 
-                           lat2 = station_lat, lon2 = station_lon)
+                                lat2 = station_lat, lon2 = station_lon)
 
     for ca in [ac[0], ac[1], ac[2], rt[0]]:
         ca.stats.coordinates = AttribDict()
@@ -301,7 +318,7 @@ def is_local(ds_in_km):
     far:  10° <= x          or  1111.1 km <= x
     
     :type ds_in_km: float
-    :param ds_in_km: Event-station distance in m
+    :param ds_in_km: Event-station distance in km
     :rtype: str
     :return: Self-explaining string for event distance.
     """
@@ -702,7 +719,7 @@ def time_windows(dist_in_km, arriv_p, arriv_s, init_sec, is_local):
     All values set to integers, as they are used for slice indexing
 
     :type dist_in_km: float
-    :param dist_in_km: Event station distance in m
+    :param dist_in_km: Event station distance in km
     :type arriv_p: float
     :param arriv_p: Arrival time of the first P-wave.
     :type arriv_s: float
@@ -866,6 +883,11 @@ def baz_analysis(rt, ac, sec):
     rt_TW = int(rt[0].stats.sampling_rate * sec)
     ac_TW = int(ac[0].stats.sampling_rate * sec)
 
+    # separate data from streams for faster rotation/correlation
+    acN = ac.select(component='N')[0].data
+    acE = ac.select(component='E')[0].data
+    rtZ = rt.select(component='Z')[0].data
+
     # create a list of backazimuths to iterate over
     step = 10
     corr_length = len(rt[0].data) // rt_TW
@@ -875,12 +897,10 @@ def baz_analysis(rt, ac, sec):
     corrbaz_list = []
     for BAZ in backas:
         for j in range(0, corr_length):
-            rotate_tmp = ac.copy()
-            rotate_tmp.rotate(method='NE->RT', back_azimuth = BAZ)
-            trv_acc_tmp = rotate_tmp.select(component='T')
-
-            corrbaz = correlate(a = rt[0].data[j*rt_TW:(j+1)*rt_TW],
-                                b = trv_acc_tmp[0].data[j*ac_TW:(j+1)*ac_TW],
+            acRTZ = rotate_ne_rt(n = acN, e = acE, ba = BAZ)
+            acT = acRTZ[1]
+            corrbaz = correlate(a = rtZ[j*rt_TW:(j+1)*rt_TW],
+                                b = acT[j*ac_TW:(j+1)*ac_TW],
                                 shift = 0)
             corrbaz_list.append(corrbaz[0])
 
@@ -1115,6 +1135,7 @@ def store_info_json(rt, ac, trv_acc, data_sources, station, event, dist_baz,
     MXE = round(max_ebaz_xcoef, rnd) # Max correlation for Estimated BAz
     DS_KM = round(0.001 * dist_baz[0], rnd) # Epicentral Distance [km]
     DS_DEG = round(DS_KM / 111.11, rnd) # Epicentral Distance [°]
+    DS_CAT = is_local(DS_KM).lower()
     SNT = round(sn_ratio(ac, arriv_p), rnd)
     SNR = round(sn_ratio(rt, arriv_p), rnd)
 
@@ -1167,6 +1188,7 @@ def store_info_json(rt, ac, trv_acc, data_sources, station, event, dist_baz,
                     ('epicentral_distance', DS_KM),
                     ('epicentral_distance_unit', 'km'),
                     ('epicentral_distance_in_deg', DS_DEG),
+                    ('distance_category', DS_CAT),
                     ('theoretical_backazimuth', TBA),
                     ('estimated_backazimuth', EBA),
                     ('backazimuth_unit', 'degrees'),
@@ -1280,7 +1302,7 @@ def store_info_json(rt, ac, trv_acc, data_sources, station, event, dist_baz,
     dic_event.update(dic_station)
 
     outfile = open(filename_json, 'wt')
-    json.dump(dic_event,outfile,indent=4)
+    json.dump(dic_event, outfile, indent = 4)
     outfile.close()
 
 
@@ -1425,10 +1447,11 @@ def plot_waveform_comp(event, station, mode, folder_name, tag_name):
                 lon0 = (station_lon + event_lon) / 2
 
             map = Basemap(projection='moll', lon_0=lon0, resolution='l')
-            map.drawmeridians(np.arange(0, 360, 30))
             map.drawparallels(np.arange(-90, 90, 30))
+            map.drawmeridians(np.arange(0, 360, 30))
 
     elif is_local(ds_in_km) == 'LOCAL':
+        shift_text = 35000
         event_size = 300
         plt.figure(figsize=(18, 9))
         plt.subplot2grid((4, 9), (0, 4), colspan=5, rowspan=4)
@@ -1477,117 +1500,62 @@ def plot_waveform_comp(event, station, mode, folder_name, tag_name):
                                                     linewidth=3, color='yellow')
     
     # =========================== Station/ Event ===============================
-    if station == 'RLAS':
-        ev_x, ev_y = map(event_lon, event_lat)
-        sta_x, sta_y = map(station_lon, station_lat)
+    ev_x, ev_y = map(event_lon, event_lat)
+    sta_x, sta_y = map(station_lon, station_lat)
 
-        # station
-        map.scatter(sta_x, sta_y, 200, color='b', marker='v',
-                                        edgecolor='k', zorder=100)
-        plt.text(sta_x + shift_text, sta_y, station, va='top',
-                                                 family='monospace', 
-                                                 weight='bold', 
-                                                 zorder=101,
-                                                 color='k', 
-                                                 backgroundcolor='white')
-        # event as moment tensor or star 
-        # !!! doesn't plot MT for some reason - disregard for now
-        # if moment_tensor:
-        #     ax = plt.gca()
-        #     ax.axis('equal')
-        #     ax.axis('off')
-        #     b = beach(moment_tensor, xy=(ev_x,ev_y), facecolor='blue',
-        #                                 width=100, linewidth=1, alpha=1.0)
-        #     b.set_zorder(100)
-        #     ax.add_collection(b)
-        # else:
-        #     map.scatter(ev_x, ev_y, 200, color="b", marker="*", 
-        #                                         edgecolor="k", zorder=100)
+    # station
+    map.scatter(sta_x, sta_y, 200, color='b', marker='v',
+                                    edgecolor='k', zorder=100)
+    plt.text(sta_x + shift_text, sta_y, station, va='top',
+                                             family='monospace', 
+                                             weight='bold', 
+                                             zorder=101,
+                                             color='k', 
+                                             backgroundcolor='white')
+    # event as moment tensor or star 
+    # !!! doesn't work for some reason - disregard for now
+    # if moment_tensor:
+    #     ax = plt.gca()
+    #     b = beach(moment_tensor, xy=(ev_x,ev_y), facecolor='blue',
+    #                                 width=100, linewidth=1, alpha=1.0)
+    #     b.set_zorder(100)
+    #     ax.add_collection(b)
+    # else:
+    #     map.scatter(ev_x, ev_y, 200, color="b", marker="*", 
+    #                                         edgecolor="k", zorder=100)
 
-        # event
-        map.scatter(ev_x, ev_y, event_size, color="b", marker="*", 
-                                                edgecolor="k", zorder=100)
+    # event
+    map.scatter(ev_x, ev_y, event_size, color="b", marker="*", 
+                                            edgecolor="k", zorder=100)
 
-        # title large
-        plt.subplot2grid((4, 9), (1, 0), colspan=2)
-        plt.title(u'{}T{}Z\n'.format(startev.date, startev.time), 
-                                            fontsize=20, weight='bold')
-        ax = plt.gca()
-        ax.axis('equal')
-        ax.axis('off')
+    # title large
+    plt.subplot2grid((4, 9), (1, 0), colspan=2)
+    plt.title(u'{}T{}Z\n'.format(startev.date, startev.time), 
+                                        fontsize=20, weight='bold')
+    ax = plt.gca()
+    ax.axis('equal')
+    ax.axis('off')
 
-        # sub-title
-        plt.subplot2grid((4, 9), (2, 0), colspan=2)
-        plt.title(u'\n\nRegion: {}'.format(flinn_engdahl_title) + 
-                '\n\nMagnitude: {} {}'.format(mag.mag,mag.magnitude_type) + 
-                '\n\nDistance: {} [km], {} [°]'.format(
-                                    round(ds_in_km,2), round(BAz,2)) + 
-                '\n\nDepth: {} [km]'.format(depth),
-                  fontsize=18, fontweight='bold')
+    # sub-title
+    plt.subplot2grid((4, 9), (2, 0), colspan=2)
+    plt.title(u'\n\nRegion: {}'.format(flinn_engdahl_title) + 
+            '\n\nMagnitude: {} {}'.format(mag.mag,mag.magnitude_type) + 
+            '\n\nDistance: {} [km], {} [°]'.format(
+                                round(ds_in_km,2), round(BAz,2)) + 
+            '\n\nDepth: {} [km]'.format(depth),
+              fontsize=18, fontweight='bold')
 
-        ax = plt.gca()
-        ax.axis('off')
+    ax = plt.gca()
+    ax.axis('off')
 
-        plt.subplot2grid((4, 9), (3, 0), colspan=2)
-        plt.title(u'Event Information: \n Global Centroid-Moment-Tensor '
-                  'Catalog (GCMT) \n\n Processing Date:\n' + 
-                  str(UTCDateTime().date),
-                  fontsize=14)
-        ax = plt.gca()
-        ax.axis('off')
+    plt.subplot2grid((4, 9), (3, 0), colspan=2)
+    plt.title(u'Event Information: \n Global Centroid-Moment-Tensor '
+              'Catalog (GCMT) \n\n Processing Date:\n' + 
+              str(UTCDateTime().date),
+              fontsize=14)
 
-    # stations other than RLAS, not tested yet - was written for PFO
-    else:
-        x, y = map(event_lon, event_lat)
-        statlon, statlat = map(station_lon, rt[0].stats.
-                               coordinates.latitude)
-
-        if is_local(ds_in_km) == 'LOCAL':
-            map.scatter(x, y, 600, color="b", marker="*", edgecolor="k",
-                                                                    zorder=100)
-            map.scatter(statlon, statlat, 700, color="b", marker="v",
-                                                    edgecolor="k", zorder=100)
-            plt.text(statlon + 27000, statlat, station, fontsize=18, va="top",
-                                family="monospace", weight="bold", zorder=101,
-                                 color='k', backgroundcolor='white')
-        elif is_local(ds_in_km) == 'FAR':
-            map.scatter(x, y, 200, color="b", marker="*", edgecolor="k",
-                                                                     zorder=100)
-            map.scatter(statlon, statlat, 300, color="b", marker="v",
-                                                    edgecolor="k", zorder=100)
-            plt.text(statlon + 200000, statlat, station, va="top",
-                                family="monospace", weight="bold", zorder=101,
-                                color='k', backgroundcolor='white')
-        else:
-            map.scatter(x, y, 250, color="b", marker="*", edgecolor="k",
-                                                                     zorder=100)
-            map.scatter(statlon, statlat, 400, color="b", marker="v",
-                                                      edgecolor="k", zorder=100)
-            plt.text(statlon + 6000, statlat + 1000, station, va="top",
-                                  family="monospace", weight="bold", zorder=101,
-                             color='k', backgroundcolor='white', fontsize=18)
-
-        plt.subplot2grid((4, 9), (1, 0), colspan=2)
-        plt.title(u'Event: %s %sZ\n' % (startev.date, startev.time), 
-                                                    fontsize=20, weight='bold')
-        ax = plt.gca()
-        ax.axis('equal')
-        ax.axis('off')
-
-        plt.subplot2grid((4, 9), (3, 0), colspan=2)
-        if reg==True:
-            plt.title(u'\n\nRegion: %s \n\nMagnitude: %s \n\nDistance: %.2f [km], %.2f [°]\n\nDepth: %.2f [km]'
-                      % (region, str(event).split('\n')[0][57:64], 0.001 * DS,
-                         0.001 * DS / 111.11, depth),
-                      fontsize=18, fontweight='bold')
-        else:
-            plt.title(u'\nMagnitude: %s \n\nDistance: %.2f [km], %.2f [°]'
-                      '\n\nDepth: %.2f [km]'
-                      % (str(event).split('\n')[0][57:63], 0.001 * DS,
-                         0.001 * DS / 111.11, depth), fontsize=18,
-                      fontweight='bold')
-        ax = plt.gca()
-        ax.axis('off')
+    ax = plt.gca()
+    ax.axis('off')
 
     # ============================= Save Figure ============================
     plt.savefig(
@@ -1619,8 +1587,9 @@ def plot_waveform_comp(event, station, mode, folder_name, tag_name):
 
     # theoretical arrival times for seismics phases
     arriv_p, arriv_s = ps_arrival_times(ds_in_km, depth, init_sec)
+    
     min_pw, max_pw, min_sw, max_sw, min_lwi, max_lwi, min_lwf, max_lwf = \
-                    time_windows(ds_in_km, arriv_p, arriv_s, init_sec, is_local(ds_in_km))
+        time_windows(ds_in_km, arriv_p, arriv_s, init_sec, is_local(ds_in_km))
 
     # ======================================================================== 
     #                                
@@ -1818,13 +1787,12 @@ def plot_waveform_comp(event, station, mode, folder_name, tag_name):
 
     # zero-lag correlation coefficients for range of backazimuths
     print("Analyzing correlation by BAz bins...")
-    corrbaz, maxcorr, backas, max_coefs_10deg = baz_analysis(
-                                                    rt, ac, sec)
+    corrbaz, maxcorr, backas, max_coefs_10deg = baz_analysis(rt, ac, sec)
 
     # estimate backazimuth and correlations for given BAz
     print("Estimating best backazimuth values...")
     corrsum, baz_list, max_ebaz_xcoef, EBA = estimate_baz(
-                                        rt, ac, min_sw, max_lwf)
+                                                        rt, ac, min_sw, max_lwf)
 
     print("Calculating phase velocities...")
     phasv = get_phase_vel(rt, trv_acc, sec, corrcoefs, start=0)
@@ -1891,7 +1859,7 @@ def plot_waveform_comp(event, station, mode, folder_name, tag_name):
     norm = mpl.colors.Normalize(vmin=0.75, vmax=1)
     cb1 = mpl.colorbar.ColorbarBase(
                             fig, cmap=cmap, norm=norm, orientation='vertical',
-                            ticks=[0.75, 0.8, 0.85, 0.9, 0.95, 1.0])
+                            ticks=np.linspace(0.75,1,6).tolist())
     cb1.set_label(r'X-corr. coeff.', fontweight='bold')
 
     # subplot 3
@@ -1902,7 +1870,14 @@ def plot_waveform_comp(event, station, mode, folder_name, tag_name):
                                         label='CC for theo. BAz', linewidth=1)
     plt.plot(np.arange(0, sec * len(corrcoefs) + 1, sec), thres, '--r', lw=2)
     plt.ylabel(r'X-corr. coeff.', fontsize=10, fontweight='bold')
-    plt.text(time[len(time) - 1] + 50, 0.71, r'0.75', color='red')
+
+    # 75% annotation location
+    if is_local(ds_in_km) == 'FAR':
+        shift75 = 50
+    else:
+        shift75 = 10
+
+    plt.text(time[len(time) - 1] + shift75, 0.71, r'0.75', color='red')
     plt.xlim(0, rt[0].stats.delta * len(rt[0].data))
 
     min_corr = min(min(max_coefs_10deg), min(corrcoefs))
@@ -1931,14 +1906,14 @@ def plot_waveform_comp(event, station, mode, folder_name, tag_name):
     plt.xlabel(r'Time [s]', fontweight='bold')
     plt.ylabel(r'BAz [°]', fontsize=10, fontweight='bold')
     plt.ylim([0, 360])
-    plt.yticks([0,60,120,180,240,300,360])
+    plt.yticks(np.linspace(0,360,7).tolist())
     plt.grid(True)
     fig = plt.subplot2grid((4, 26), (3, 25))
     norm = mpl.colors.Normalize(vmin=-1, vmax=1)
     cb1 = mpl.colorbar.ColorbarBase(fig, cmap=plt.cm.RdYlGn_r, norm=norm, 
                                                         orientation='vertical')
     cb1.set_label(r'X-corr. coeff.', fontweight='bold')
-    cb1.set_ticks([-1.0,-0.75,-0.5,-0.25,0.0,0.25,0.5,0.75,1.0])
+    cb1.set_ticks(np.linspace(-1,1,9).tolist())
 
     # ============================= Save Figure =============================
     
@@ -1952,10 +1927,10 @@ def plot_waveform_comp(event, station, mode, folder_name, tag_name):
     #                                P-Coda analysis
     #
     # ========================================================================= 
-    print("Analyzing rotations in the P-coda")
+    print("Analyzing rotations in the P-coda...")
     
     # Zero-lag correlation coefficients
-    print("Zero-lag cross correlation...",end=" ")
+    print("Zero-lag cross correlations...",end=" ")
 
     # integer sampling rates
     rt_pc_SR = int(filt_rt_pcoda[0].stats.sampling_rate)
@@ -1977,13 +1952,13 @@ def plot_waveform_comp(event, station, mode, folder_name, tag_name):
     for i in range(3):
         ac_pcoda_cut[i].data = filt_ac_pcoda[i].data[0:lwi_average * ac_pc_SR]
     
-    for traces in [rt_pcoda_cut,ac_pcoda_cut,trv_pcoda_cut]:
+    for traces in [rt_pcoda,rt_pcoda_cut,ac_pcoda_cut,trv_pcoda_cut]:
         traces.taper(max_percentage=0.05)
 
     # find correlations
     corrcoefs_p, thres_p = get_corrcoefs(rt_pcoda_cut, trv_pcoda_cut, sec_p)
 
-    print("Backzimuth...")
+    print("Backzimuths...")
     # surface wave start sample
     max_lwi_ac = ac_pc_SR * max_lwi
 
@@ -2036,6 +2011,7 @@ def plot_waveform_comp(event, station, mode, folder_name, tag_name):
     plt.grid(True)
 
     # subplot 2
+    xlim2 = (min_lwi + max_lwi) // 2
     plt.subplot2grid((5, 26), (1, 0), colspan=25, rowspan=2)
 
     plt.plot(time_p, rt_pcoda[0].data, color='r', label=r'Rotation rate')
@@ -2043,10 +2019,10 @@ def plot_waveform_comp(event, station, mode, folder_name, tag_name):
                                              label=r'Transversal acceleration')
     plt.ylabel(r'$\dot{\mathbf{\Omega}}_\mathbf{z}$ [nrad/s] -'
                    'a$_\mathbf{T}$/2c [1/s]', fontweight='bold', fontsize=11)
-    plt.xlim(0, (min_lwi + max_lwi) // 2)
+    plt.xlim(0, xlim2)
     plt.ylim(min(rt_pcoda[0].data[0:max_lwi_ac]), 
         fact1_p + max((1. / (2. * c1_p)) * trv_pcoda[0].data[0:max_lwi_ac]))
-    xlim2 = (min_lwi + max_lwi) // 2
+    
     box_yposition2 = (fact1_p + max((1. / (2. * c1_p)) * 
                         trv_pcoda[0].data[0:max_lwi_ac]) -
                         np.abs(min(rt_pcoda[0].data[0: max_lwi_ac])))/2.
@@ -2065,7 +2041,7 @@ def plot_waveform_comp(event, station, mode, folder_name, tag_name):
     plt.subplot2grid((5, 26), (3, 0), colspan=25)
     plt.plot(np.arange(0, sec_p * len(corrcoefs_p), sec_p), corrcoefs_p, '.k')
     plt.ylabel(r'X-corr. coeff.', fontweight='bold')
-    plt.xlim(0, (min_lwi + max_lwi) // 2)
+    plt.xlim(0, xlim2)
     plt.ylim(0, 1)
     plt.grid(True)
 
@@ -2074,11 +2050,11 @@ def plot_waveform_comp(event, station, mode, folder_name, tag_name):
     plt.pcolor(Xp, Yp, corrbaz_p, cmap=plt.cm.RdYlGn_r, vmin=-1, vmax=1)
     plt.plot(np.arange(0, sec_p * len(corrcoefs_p), sec_p), 
                                                         maxcorr_p_list, '.k')
-    plt.xlim(0, (min_lwi + max_lwi) // 2)
+    plt.xlim(0, xlim2)
     plt.xlabel(r'Time [s]', fontweight='bold')
     plt.ylabel(r'BAz [°]', fontweight='bold')
     plt.ylim([0, 360])
-    plt.yticks([0,60,120,180,240,300,360])
+    plt.yticks(np.linspace(0,360,7).tolist())
     plt.grid(True)
 
     fig = plt.subplot2grid((5, 26), (4, 25))
@@ -2086,7 +2062,7 @@ def plot_waveform_comp(event, station, mode, folder_name, tag_name):
     cb1 = mpl.colorbar.ColorbarBase(fig, cmap=plt.cm.RdYlGn_r, norm=norm, 
                                                         orientation='vertical')
     cb1.set_label(r'X-corr. coeff.', fontweight='bold')
-    cb1.set_ticks([-1.0,-0.75,-0.5,-0.25,0.0,0.25,0.5,0.75,1.0])
+    cb1.set_ticks(np.linspace(-1,1,9).tolist())
    
     # ============================= Save Figure ============================== 
     plt.savefig(
@@ -2121,7 +2097,7 @@ def generate_tags(event):
     :return tag_name: event tag i.e. 'GCMT_2017-09-23T125302_6.05_OAXACA_MEXICO'
     :rtype folder_name: str
     :return folder_name: folder name tag
-    :rtype check_folder_exists: list
+    :rtype check_folder_exists: list of str
     :return check_folder_exists: glob list with identical file names if event 
                                 was already processed
     """
@@ -2267,7 +2243,7 @@ if __name__ == '__main__':
         catalog = 'ISC'
 
     else:
-        sys.exit('Invalid mode')
+        sys.exit('Invalid mode: {}'.format(mode))
 
     # set file output path
     output_path = './OUTPUT/'
@@ -2279,10 +2255,8 @@ if __name__ == '__main__':
     bars = '='*79
     error_list = []
     for event in cat:
-        import pdb;pdb.set_trace
         try:
             tag_name, folder_name, check_folder_exists = generate_tags(event)
-
             # check if current event folder exists
             if check_folder_exists:
                 # check if event source is the same, assumes 0 or 1 files found
