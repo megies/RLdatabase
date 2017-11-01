@@ -1522,9 +1522,9 @@ def plot_waveform_comp(event, station, mode, folder_name, tag_name):
     #     ax.add_collection(b)
     # else:
     #     map.scatter(ev_x, ev_y, 200, color="b", marker="*", 
-    #                                         edgecolor="k", zorder=100)
+    #                                         edgecolor="k", zorder=200)
 
-    # event
+    # plot event
     map.scatter(ev_x, ev_y, event_size, color="b", marker="*", 
                                             edgecolor="k", zorder=100)
 
