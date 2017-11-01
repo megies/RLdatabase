@@ -504,7 +504,7 @@ def remove_instr_resp(rt, ac, rt_pcoda, ac_pcoda, station, startev):
             traza.data = 1e9 * traza.data
 
     else:
-        sys.exit('Invalid station')
+        raise RotationalProcessingException("Invalid station")
 
     # make sure start and endtimes match for both instruments, if not, trim
     startaim = max([tr.stats.starttime for tr in (ac + rt)])
