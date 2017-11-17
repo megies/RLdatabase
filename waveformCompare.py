@@ -38,7 +38,8 @@ catalogs (ISC, ...), Accomplished by setting: --mode iscquakeml
 + default --mode fetches data from the GCMT New Quick catalog or a local .NDK
 
 + events can be fetched from IRIS FDSN webservice, which is usually faster
-and more abundant especially for older events. Set: --mode iris
+and more abundant especially for older events. Set: --mode iris, magnitudes
+are MW however, and MWC from GCMT default mode.
 
 + non-local events bandstoppped for secondary microseism frequencies (5-12s) 
 
@@ -1369,8 +1370,7 @@ def plot_waveform_comp(event, station, mode, folder_name, tag_name):
 
     """
     Main processing script, calls all other functions defined above.
-    Compare vertical rotation rate and transversal acceleration through
-    direct waveform comparison in different through cross-correlation analysis. It also stores some values obtained through the
+    Compare vertical rotation rate and transverse acceleration.
     Creates and saves four figures, a .json file with processed parameters,
     and a QuakeML file for each event.
  
@@ -1585,9 +1585,10 @@ def plot_waveform_comp(event, station, mode, folder_name, tag_name):
     # find trace start
     init_sec = startev - ac[0].stats.starttime
 
-    # theoretical arrival times for seismics phases
+    # theoretical arrival times for P and S waves
     arriv_p, arriv_s = ps_arrival_times(ds_in_km, depth, init_sec)
     
+    # determine time windows for seismic phases (P,S,surface)
     min_pw, max_pw, min_sw, max_sw, min_lwi, max_lwi, min_lwf, max_lwf = \
         time_windows(ds_in_km, arriv_p, arriv_s, init_sec, is_local(ds_in_km))
 
@@ -1600,9 +1601,11 @@ def plot_waveform_comp(event, station, mode, folder_name, tag_name):
     print("\nPage 2 >  Waveform Comparison...",end=" ")
 
     # rt.taper(max_percentage=0.05) # this was here but we already taper?
-    c1 = .5 * max(abs(trv_acc[0].data)) / max(abs(rt[0].data))  # vel in m/s
-    fact1 = 2 * max(rt[0].data)  # Factor to displace the rotation rate
-    time = rt[0].stats.delta * np.arange(0, len(rt[0].data))  # time in seconds
+
+    # phase velocity, factor for displacing rotation rate, and time array
+    c1 = .5 * max(abs(trv_acc[0].data)) / max(abs(rt[0].data))  
+    fact1 = 2 * max(rt[0].data)  
+    time = rt[0].stats.delta * np.arange(0, len(rt[0].data))
 
     # main figure
     plt.figure(figsize=(18, 9))
@@ -1774,7 +1777,8 @@ def plot_waveform_comp(event, station, mode, folder_name, tag_name):
     # correlate vertical rotation rate and transverse acceleration
     corrcoefs, thres = get_corrcoefs(rt, trv_acc, sec)
 
-    # calculate correlations for different frequency bands given by seconds_list
+    # calculate correlations for different frequency bands,
+    # length of time windows given by seconds_list
     corrcoefs_bands, thresholds = [], []
     seconds_list = [200, 100, 50, 20, 12, 10, 8, 6]
 
@@ -2243,18 +2247,20 @@ if __name__ == '__main__':
         catalog = 'ISC'
 
     else:
-        sys.exit('Invalid mode: {}'.format(mode))
+        sys.exit('Invalid mode: {}\nValid: GCMT,IRIS,ISCQUAKEML'.format(mode))
 
     # set file output path
     output_path = './OUTPUT/'
     if not os.path.exists(output_path): 
         os.makedirs(output_path)
 
-    print("%i event(s) downloaded, beginning processing..." % len(cat))
-    success_counter = fail_counter = already_processed = 0
+    print("%i event(s) downloaded, beginning processing...\n" % len(cat))
+    event_counter = success_counter = fail_counter = already_processed = 0
     bars = '='*79
-    error_list = []
+    error_list,error_type = [],[]
     for event in cat:
+        event_counter += 1
+        print("{} of {} event(s)".format(event_counter,len(cat)))
         try:
             tag_name, folder_name, check_folder_exists = generate_tags(event)
             # check if current event folder exists
@@ -2262,7 +2268,9 @@ if __name__ == '__main__':
                 # check if event source is the same, assumes 0 or 1 files found
                 if (os.path.basename(check_folder_exists[0]) != 
                                                 os.path.basename(folder_name)):
-                    print('This event was processed with another mode\n')
+                    print("This event was processed with another mode\n")
+                    error_list.append(tag_name)
+                    error_type.append("Processed w/ Another Mode")
                     already_processed += 1
                     continue
 
@@ -2272,6 +2280,8 @@ if __name__ == '__main__':
                     data = json.load(open(filename_json))
                     if data['station_information_{}'.format(station)]:
                         print("This event was already processed\n")
+                        error_list.append(tag_name)
+                        error_type.append("Already Processed")
                         already_processed += 1
                     else:
                         try:
@@ -2281,11 +2291,12 @@ if __name__ == '__main__':
 
                         # if any error, remove folder, continue
                         except Exception as e:
-                            fail_counter += 1
                             print(e)
                             print("Removing incomplete folder...\n")
                             error_list.append(tag_name)
+                            error_type.append(e)
                             shutil.rmtree(folder_name)
+                            fail_counter += 1
 
                         # if keyboard interrupt, remove folder, quit
                         except KeyboardInterrupt:
@@ -2295,9 +2306,11 @@ if __name__ == '__main__':
 
                 # if json not found, folder is incomplete, continue
                 except FileNotFoundError:
-                    fail_counter += 1 
                     error_list.append(tag_name)
+                    error_type.append("Incomplete Folder")
                     print("Incomplete folder found\n")
+                    fail_counter += 1 
+
 
             
             # event encountered for the first time, create folder, xml, process
@@ -2312,12 +2325,13 @@ if __name__ == '__main__':
                 
                 # if any error, remove folder, continue
                 except Exception as e:
-                    fail_counter += 1
                     print(e)
                     print("Removing incomplete folder...\n")
                     error_list.append(tag_name)
+                    error_type.append(e)
                     shutil.rmtree(folder_name)
-               
+                    fail_counter += 1
+
                 # if keyboard interrupt, remove folder, quit
                 except KeyboardInterrupt:
                     fail_counter += 1
@@ -2327,8 +2341,11 @@ if __name__ == '__main__':
 
         # if error creating tags, continue
         except Exception as e:
+            print("Error in folder/tag name creation;\n",e)
+            error_list.append(event.resource_id.id)
+            error_type.append('Tag Creation')
             fail_counter += 1
-            print("Error in folder/tag name creation; ",e)
+
 
     # print end message
     print('{}\n'.format('_'*79))
@@ -2345,10 +2362,23 @@ if __name__ == '__main__':
         errorlog_name = './errorlogs/wavComp_{}_{}.txt'.format(
                                 args.min_datetime[:10],args.max_datetime[:10])
         print("Writing error log: {}".format(errorlog_name))
-        with open(errorlog_name,'w') as f:
+
+        write_mode = 'w'
+        if os.path.exists(errorlog_name):
+            write_mode = 'a+'
+
+        with open(errorlog_name, write_mode) as f:
             f.write("Error Log Created {}\n".format(datetime.datetime.now()))
-            for i in error_list:
-                f.write('{}\n'.format(i))
+
+            # prompt showing search parameters and number of failed processes
+            f.write("{}<datetime<{}\n{}<mag<{}\nmode:{}\nfailed:{}/{}\n".format(
+                                        args.min_datetime,args.max_datetime,
+                                        args.min_magnitude,args.max_magnitude,
+                                        mode,fail_counter+already_processed,
+                                        len(cat)))
+            for i,j in zip(error_list,error_type):
+                f.write('{}\t{}\n'.format(i,j))
+            f.write('_'*79)
 
 # Debugger (* paste in wherever you want to break the code)
 # import pdb; pdb.set_trace()

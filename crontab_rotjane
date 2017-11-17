@@ -21,6 +21,6 @@
 # 
 # m h  dom mon dow   command
 
-00 02 * * * cd /path/to/RLDatabase; python waveformCompare_20170110_master.py
+00 02 * * * python /path/to/RLDatabase/waveformCompare.py
 
-00 03 * * * python event_upload_rotjane.py --timespan week
+00 03 * * * python /path/to/RLDatabase/event_upload_rotjane.py --timespan week
