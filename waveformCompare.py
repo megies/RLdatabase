@@ -141,12 +141,12 @@ def download_data(origin_time, instrument_id, source):
     # if data path exists, create file path names for day and day+1
     if dataDir_get:
         print("Fetching {} data from file".format(net))
-        fileName = '.'.join(instrument_id,'D',origin_time.strftime('%Y.%j'))
+        fileName = '.'.join((instrument_id,'D',origin_time.strftime('%Y.%j')))
         filePath = os.path.join(dataDir_get, origin_time.strftime('%Y'),
                                 net, sta, cha + '.D', fileName)
         
         origin_time2 = origin_time + 86400
-        fileName2 = '.'.join(instrument_id,'D',origin_time2.strftime('%Y.%j'))
+        fileName2 = '.'.join((instrument_id,'D',origin_time2.strftime('%Y.%j')))
         filePath2 = os.path.join(dataDir_get, origin_time2.strftime('%Y'),
                                 net, sta, chan + '.D', fileName2)
 
