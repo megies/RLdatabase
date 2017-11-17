@@ -148,7 +148,7 @@ def download_data(origin_time, instrument_id, source):
         origin_time2 = origin_time + 86400
         fileName2 = '.'.join((instrument_id,'D',origin_time2.strftime('%Y.%j')))
         filePath2 = os.path.join(dataDir_get, origin_time2.strftime('%Y'),
-                                net, sta, chan + '.D', fileName2)
+                                net, sta, cha + '.D', fileName2)
 
         # if full path exists, read in data, check if time extends to day+1
         if os.path.isfile(filePath):
