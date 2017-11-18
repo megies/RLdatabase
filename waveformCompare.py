@@ -2367,7 +2367,7 @@ if __name__ == '__main__':
         with open(errorlog_name, write_mode) as f:
             f.write("Error Log Created {}\n".format(datetime.datetime.now()))
 
-            # prompt showing search parameters and number of failed processes
+            # prompt showing search parameters, counters and errors
             f.write(("{} < datetime < {}\n{} < mag < {}\n"
                      "mode: {}\nsuccess: {}/{}\nerror: {}/{}\n"
                      "already processed: {}/{}\n").format(
