@@ -2341,7 +2341,7 @@ if __name__ == '__main__':
 
         # if error creating tags, continue
         except Exception as e:
-            print("Error in folder/tag name creation;\n",e)
+            print("Error in tag generation: {}\n".format(e))
             error_list.append(event.resource_id.id)
             error_type.append('Tag Creation')
             fail_counter += 1
@@ -2354,13 +2354,12 @@ if __name__ == '__main__':
           "\n %i could not be processed \n %i already processed\n" % (
               len(cat), success_counter, fail_counter, already_processed))
     
-    # write error log to see events failed, named by search timeframe
+    # write error log to see events failed
     if len(error_list) > 0:
         if not os.path.exists('./errorlogs'):
             os.makedirs('./errorlogs')
 
-        errorlog_name = './errorlogs/wavComp_{}_{}.txt'.format(
-                                args.min_datetime[:10],args.max_datetime[:10])
+        errorlog_name = './errorlogs/wavComp_errorlog.txt'
         print("Writing error log: {}".format(errorlog_name))
 
         write_mode = 'w'
@@ -2371,7 +2370,8 @@ if __name__ == '__main__':
             f.write("Error Log Created {}\n".format(datetime.datetime.now()))
 
             # prompt showing search parameters and number of failed processes
-            f.write("{}<datetime<{}\n{}<mag<{}\nmode:{}\nfailed:{}/{}\n".format(
+            f.write(("{} < datetime < {}\n{} < mag < {}\n"
+                     "mode: {}\nfailed: {}/{}\n").format(
                                         args.min_datetime,args.max_datetime,
                                         args.min_magnitude,args.max_magnitude,
                                         mode,fail_counter+already_processed,
