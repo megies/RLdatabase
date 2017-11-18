@@ -2280,8 +2280,6 @@ if __name__ == '__main__':
                     data = json.load(open(filename_json))
                     if data['station_information_{}'.format(station)]:
                         print("This event was already processed\n")
-                        error_list.append(tag_name)
-                        error_type.append("Already Processed")
                         already_processed += 1
                     else:
                         try:
@@ -2371,11 +2369,13 @@ if __name__ == '__main__':
 
             # prompt showing search parameters and number of failed processes
             f.write(("{} < datetime < {}\n{} < mag < {}\n"
-                     "mode: {}\nfailed: {}/{}\n").format(
+                     "mode: {}\nsuccess: {}/{}\nerror: {}/{}\n"
+                     "already processed: {}/{}\n").format(
                                         args.min_datetime,args.max_datetime,
                                         args.min_magnitude,args.max_magnitude,
-                                        mode,fail_counter+already_processed,
-                                        len(cat)))
+                                        mode,success_counter,len(cat),
+                                        fail_counter,len(cat),
+                                        already_processed,len(cat)))
             for i,j in zip(error_list,error_type):
                 f.write('{}\t{}\n'.format(i,j))
             f.write('_'*79)
