@@ -17,11 +17,14 @@ authority = ('chow','chow')
 OUTPUT_PATH = os.path.abspath('./OUTPUT/')
 # our apache is serving this via https now, so we have to use the Geophysik
 # root certificate
-SSL_ROOT_CERTIFICATE = os.path.expanduser(
-    '~/ssl/geophysik_root_certificate/CAcert.pem')
+# the certificate was switched to an official DFN certificate (that should be
+# registered in the system)
+# SSL_ROOT_CERTIFICATE = os.path.expanduser(
+#     '~/ssl/geophysik_root_certificate/CAcert.pem')
 requests_kwargs = {
     'auth': authority,
-    'verify': SSL_ROOT_CERTIFICATE}
+    # 'verify': SSL_ROOT_CERTIFICATE,
+    }
 
 # command line arguments
 parser = argparse.ArgumentParser(description='Upload event quakeml and \
