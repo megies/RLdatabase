@@ -2128,16 +2128,23 @@ def generate_tags(event):
     orig = event.preferred_origin() or event.origins[0]
     time_tag = orig['time'].isoformat()[:19].replace(':','')+'Z'
 
+	
+    #. Organize in Year and Monthly folders, i.e. '2017/09/GCMT_2017-09-23T125302_6.05_OAXACA_MEXICO'
+    output_path_Alt=output_path+"/"+(orig['time'].isoformat()[:4])+"/"+(orig['time'].isoformat()[5:7])
+
+
     # i.e. 'GCMT_2017-09-23T125302_6.05_OAXACA_MEXICO'
     tag_name = '_'.join((catalog,time_tag,mag_tag,flinn_engdahl))
 
     # i.e. './OUTPUT/GCMT_2017-09-23T125302_6.05_OAXACA_MEXICO/
-    folder_name = os.path.join(output_path,tag_name)
+    folder_name = os.path.join(output_path_Alt,tag_name)
+
+
 
     # short tags used to check if an event with the same time tag has 
     # been processed because different catalogs publish diff. magnitudes
     tag_name_short = '_'.join((catalog,time_tag))
-    folder_name_short = os.path.join(output_path,tag_name_short)
+    folder_name_short = os.path.join(output_path_Alt,tag_name_short)
     check_folder_exists = glob.glob(folder_name_short + '*')
 
     return tag_name, folder_name, check_folder_exists
