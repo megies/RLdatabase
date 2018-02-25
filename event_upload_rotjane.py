@@ -13,8 +13,20 @@ import datetime
 
 # settings 
 root_path = 'http://127.0.0.1:8000/rest/'
-authority = ('nico','Password1')
+authority = ('chow','chow')
 OUTPUT_PATH = os.path.abspath('./OUTPUT/')
+
+# our apache is serving this via https now, so we have to use the Geophysik
+# root certificate
+# the certificate was switched to an official DFN certificate (that should be
+# registered in the system)
+# SSL_ROOT_CERTIFICATE = os.path.expanduser(
+#     '~/ssl/geophysik_root_certificate/CAcert.pem')
+requests_kwargs = {
+    'auth': authority,
+    # 'verify': SSL_ROOT_CERTIFICATE,
+    }
+
 
 # command line arguments
 parser = argparse.ArgumentParser(description='Upload event quakeml and \
@@ -89,15 +101,14 @@ for event in cat:
         # push quakeml file
         with open(xml,'rb') as fh:
             r = requests.put(
-                url=root_path + 'documents/quakeml/{}'.format(xml),
-                auth=authority,
-                data=fh)
+                url=root_path + 'documents/quakeml/{}'.format(xml), 
+		data=fh, **requests_kwargs)
 
         # check: already uploaded (409) and check for incomplete folders
         if r.status_code == 409:
             r2 = requests.get(
                 url=root_path + 'documents/quakeml/{}'.format(xml),
-                auth=authority)
+                **requests_kwargs)
             assert r2.ok
 
             try:
@@ -121,7 +132,7 @@ for event in cat:
         # find attachment url
         r = requests.get(
                 url=root_path + 'documents/quakeml/{}'.format(xml),
-                auth=authority)
+                **requests_kwargs)
         assert r.ok
 
         attachment_url = r.json()['indices'][0]['attachments_url']
@@ -130,21 +141,15 @@ for event in cat:
         for pngs,heads in zip([page1,page2,page3,page4],
                                 [head_p1,head_p2,head_p3,head_p4]):
             with open(pngs,'rb') as fhp:
-                r = requests.post(
-                    url=attachment_url,
-                    auth=authority,
-                    headers=heads,
-                    data=fhp)
+		r = requests.post(url=attachment_url, headers=heads, data=fhp,
+                **requests_kwargs)
 
             assert r.ok
 
         # post .json
         with open(json,'rb') as fhj:
-            r = requests.post(
-                url=attachment_url,
-                auth=authority,
-                headers=headers_json,
-                data=fhj)
+            r = requests.post(url=attachment_url, headers=headers_json,
+            data=fhj, **requests_kwargs)
 
             assert r.ok
 
@@ -161,7 +166,7 @@ for event in cat:
         print(r.content.decode('UTF-8'))
         r_del = requests.delete(
                 url=root_path + 'documents/quakeml/{}'.format(xml),
-                auth=authority)
+                **requests_kwargs)
 
         # tag errors for errolog
         error_list.append(os.path.basename(event))
