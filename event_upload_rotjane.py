@@ -15,6 +15,7 @@ import datetime
 root_path = 'http://127.0.0.1:8000/rest/'
 authority = ('chow','chow')
 OUTPUT_PATH = os.path.abspath('./OUTPUT/')
+
 # our apache is serving this via https now, so we have to use the Geophysik
 # root certificate
 # the certificate was switched to an official DFN certificate (that should be
@@ -25,6 +26,7 @@ requests_kwargs = {
     'auth': authority,
     # 'verify': SSL_ROOT_CERTIFICATE,
     }
+
 
 # command line arguments
 parser = argparse.ArgumentParser(description='Upload event quakeml and \
@@ -52,11 +54,12 @@ if timespan == 'week':
     cat = []
     for J in range(7):
         past = datetime.datetime.utcnow() - datetime.timedelta(days=J)
-        day = glob.glob(os.path.join(OUTPUT_PATH, 'GCMT_{}*'.format(past.isoformat()[:10])))
+	#. Look for folders inside two subdirectories 
+        day = glob.glob(os.path.join(OUTPUT_PATH, '*/*/GCMT_{}*'.format(past.isoformat()[:10])))
         cat += day
 elif timespan == 'all':
     # initial population, grab all events in folder
-    cat = glob.glob(os.path.join(OUTPUT_PATH, 'GCMT*')) + \
+    cat = glob.glob(os.path.join(OUTPUT_PATH, '*/GCMT*')) + \
         glob.glob(os.path.join(OUTPUT_PATH, 'ISC*'))
     cat.sort(reverse=True)
     
@@ -98,8 +101,8 @@ for event in cat:
         # push quakeml file
         with open(xml,'rb') as fh:
             r = requests.put(
-                url=root_path + 'documents/quakeml/{}'.format(xml),
-                data=fh, **requests_kwargs)
+                url=root_path + 'documents/quakeml/{}'.format(xml), 
+		data=fh, **requests_kwargs)
 
         # check: already uploaded (409) and check for incomplete folders
         if r.status_code == 409:
@@ -138,15 +141,15 @@ for event in cat:
         for pngs,heads in zip([page1,page2,page3,page4],
                                 [head_p1,head_p2,head_p3,head_p4]):
             with open(pngs,'rb') as fhp:
-                r = requests.post(url=attachment_url, headers=heads, data=fhp,
-                                  **requests_kwargs)
+		r = requests.post(url=attachment_url, headers=heads, data=fhp,
+                **requests_kwargs)
 
             assert r.ok
 
         # post .json
         with open(json,'rb') as fhj:
             r = requests.post(url=attachment_url, headers=headers_json,
-                              data=fhj, **requests_kwargs)
+            data=fhj, **requests_kwargs)
 
             assert r.ok
 
