@@ -13,7 +13,7 @@ import datetime
 
 # settings 
 root_path = 'http://127.0.0.1:8000/rest/'
-authority = ('chow','chow')
+authority = ('nico','Password1')
 OUTPUT_PATH = os.path.abspath('./OUTPUT/')
 # our apache is serving this via https now, so we have to use the Geophysik
 # root certificate
