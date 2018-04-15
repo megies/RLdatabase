@@ -52,11 +52,12 @@ if timespan == 'week':
     cat = []
     for J in range(7):
         past = datetime.datetime.utcnow() - datetime.timedelta(days=J)
-        day = glob.glob(os.path.join(OUTPUT_PATH, 'GCMT_{}*'.format(past.isoformat()[:10])))
+	#.  Look for folders inside two subdirectories 
+        day = glob.glob(os.path.join(OUTPUT_PATH, '*/*/GCMT_{}*'.format(past.isoformat()[:10])))
         cat += day
 elif timespan == 'all':
     # initial population, grab all events in folder
-    cat = glob.glob(os.path.join(OUTPUT_PATH, 'GCMT*')) + \
+    cat = glob.glob(os.path.join(OUTPUT_PATH, '*/GCMT**')) + \
         glob.glob(os.path.join(OUTPUT_PATH, 'ISC*'))
     cat.sort(reverse=True)
     
