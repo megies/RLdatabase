@@ -22,8 +22,8 @@ python waveformCompare.py --min_datetime 2015-07-01T00:00 --max_datetime 2015-12
 python waveformCompare.py --min_datetime 2016-01-01T00:00 --max_datetime 2016-06-30T23:59 --mode iris
 python waveformCompare.py --min_datetime 2016-07-01T00:00 --max_datetime 2016-12-31T23:59 --mode iris
 python waveformCompare.py --min_datetime 2017-01-01T00:00 --max_datetime 2017-06-30T23:59 --mode iris
-python waveformCompare.py --min_datetime 2017-07-01T00:00 --max_datetime 2017-10-15T23:59 --mode iris
-python waveformCompare.py --min_datetime 2017-10-16T00:00 
+python waveformCompare.py --min_datetime 2017-07-01T00:00 --max_datetime 2017-12-31T23:59 --mode iris
+python waveformCompare.py --min_datetime 2018-01-01T00:00 --max_datetime 2018-04-17T23:59 --mode iris
 
 # flipped polarities
 # decided not to flip polarities as it will be interesting to filter by negative correlation, leaving calls to show time periods

@@ -57,8 +57,8 @@ if timespan == 'week':
         cat += day
 elif timespan == 'all':
     # initial population, grab all events in folder
-    cat = glob.glob(os.path.join(OUTPUT_PATH, '*/GCMT**')) + \
-        glob.glob(os.path.join(OUTPUT_PATH, 'ISC*'))
+    cat = glob.glob(os.path.join(OUTPUT_PATH, '*/*/GCMT*')) + \
+        glob.glob(os.path.join(OUTPUT_PATH, '*/*/ISC*'))
     cat.sort(reverse=True)
     
 # ============================================================================
