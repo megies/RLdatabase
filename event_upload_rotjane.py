@@ -22,7 +22,7 @@ OUTPUT_PATH = os.path.abspath('./OUTPUT/')
 # SSL_ROOT_CERTIFICATE = os.path.expanduser(
 #     '~/ssl/geophysik_root_certificate/CAcert.pem')
 requests_kwargs = {
-    'auth': authority,
+    'auth' : authority,
     # 'verify': SSL_ROOT_CERTIFICATE,
     }
 
@@ -52,7 +52,7 @@ if timespan == 'week':
     cat = []
     for J in range(7):
         past = datetime.datetime.utcnow() - datetime.timedelta(days=J)
-	#.  Look for folders inside two subdirectories 
+	#.  Look for folders inside two subdirectories      
         day = glob.glob(os.path.join(OUTPUT_PATH, '*/*/GCMT_{}*'.format(past.isoformat()[:10])))
         cat += day
 elif timespan == 'all':
@@ -60,7 +60,6 @@ elif timespan == 'all':
     cat = glob.glob(os.path.join(OUTPUT_PATH, '*/*/GCMT*')) + \
         glob.glob(os.path.join(OUTPUT_PATH, '*/*/ISC*'))
     cat.sort(reverse=True)
-    
 # ============================================================================
 
 error_list,error_type = [],[]
