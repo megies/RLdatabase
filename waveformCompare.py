@@ -2206,8 +2206,17 @@ if __name__ == '__main__':
         else:
             print("\nDownloading events from GCMT NEW QUICK")
             # a link to quick solutions for past year
-            cat_all = read_events('http://www.ldeo.columbia.edu/~gcmt/projects/'
-                                            'CMT/catalog/NEW_QUICK/qcmt.ndk')
+            # XXX temporarily avoid SSL problems due to misconfiguration of
+            # XXX webserver at www.ldeo.columbia.edu
+            import requests
+            gcmt_url = ('https://www.ldeo.columbia.edu/~gcmt/projects/'
+                        'CMT/catalog/NEW_QUICK/qcmt.ndk')
+            try:
+                cat_all = read_events(gcmt_url)
+            except requests.exceptions.SSLError:
+                import io
+                event_data = requests.get(gcmt_url, verify=False).content
+                cat_all = read_events(io.BytesIO(event_data))
 
         cat = cat_all.filter('time > '+str(args.min_datetime), 
                             'time < '+str(args.max_datetime),
