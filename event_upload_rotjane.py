@@ -52,12 +52,13 @@ if timespan == 'week':
     cat = []
     for J in range(7):
         past = datetime.date.today() - datetime.timedelta(days=J)
-        day = glob.glob(os.path.join(OUTPUT_PATH, 'GCMT_{}*'.format(past.isoformat())))
+        day = glob.glob(os.path.join(
+            OUTPUT_PATH, past.strftime('%Y'), past.strftime('%m'),
+            '*_{}*'.format(past.isoformat())))
         cat += day
 elif timespan == 'all':
     # initial population, grab all events in folder
-    cat = glob.glob(os.path.join(OUTPUT_PATH, 'GCMT*')) + \
-        glob.glob(os.path.join(OUTPUT_PATH, 'ISC*'))
+    cat = glob.glob(os.path.join(OUTPUT_PATH, '*', '*', '*'))
     cat.sort(reverse=True)
     
 # ============================================================================
