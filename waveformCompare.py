@@ -87,6 +87,8 @@ from obspy.signal.rotate import rotate_ne_rt
 from obspy.core.utcdatetime import UTCDateTime
 from obspy.core.util.attribdict import AttribDict
 from obspy.clients.fdsn import Client as fdsnClient
+from obspy.clients.fdsn.header import FDSNException
+from obspy.clients.filesystem.sds import Client as SDSClient
 from obspy.signal.cross_correlation import correlate
 from obspy.geodetics.base import gps2dist_azimuth, locations2degrees
 
@@ -97,6 +99,23 @@ from obspy.geodetics.base import gps2dist_azimuth, locations2degrees
 
 # if matplotlib.__version__ < '1.0':  # Matplotlib 1.0 or newer is necessary
 #     raise ValueError('I need Matplotlib version 1.0 or newer.')
+default_clients = []
+for sds_root in ('/freenas-ffb-01/romy_archive',
+                 '/bay200/mseed_online/archive',
+                 '/import/netapp-m-02-bay200/mseed_online/archive'):
+    try:
+        default_clients.append(SDSClient(sds_root))
+    except IOError:
+        pass
+for fdsn_url in ('http://george.geophysik.uni-muenchen.de',
+                 'http://jane.geophysik.uni-muenchen.de',
+                 'http://erde.geophysik.uni-muenchen.de',
+                 'http://eida.bgr.de'):
+    try:
+        default_clients.append(fdsnClient(fdsn_url))
+    except FDSNException:
+        pass
+
 
 class RotationalProcessingException(Exception):
 
@@ -105,7 +124,7 @@ class RotationalProcessingException(Exception):
     """
     pass
 
-def download_data(origin_time, instrument_id, source):
+def download_data(origin_time, instrument_id, source=None):
 
     """
     Downloads channel data from for the desired event day and origin time.
@@ -120,71 +139,40 @@ def download_data(origin_time, instrument_id, source):
     :param origin_time: event origin time.
     :type instrument_id: str
     :param net: FDSN SEED name for channel (i.e. `BW.RLAS..BJZ`)
-    :type soure: list of str's
-    :param source: list of URL's of FDSN webservices.
+    :type source: str
+    :param source: URL of FDSN webservice to use. If ``None``, then first
+        internal SDS is checked otherwise appropriate FDSN web services are
+        checked.
     :rtype st: :class: `~obspy.core.stream.Stream`
-    :return st: data fetched as a stream object.    
-    :rtype data_source: str
-    :return data_source: Source where data was fetched successfully 
+    :return st: data fetched as a stream object.
+    :rtype source: str
+    :return source: Source where data was fetched successfully
     """
-
     # check paths to see if running on FFB, LMU or neither
-    st = None
-    dataDir_get = '/bay200/mseed_online/archive/' #FFB
-    if not os.path.exists(dataDir_get):
-        dataDir_get = '/import/netapp-m-02-bay200/mseed_online/archive/'#LMU            
-    if not os.path.exists(dataDir_get):
-        dataDir_get = None
+    if source is not None:
+        clients = [fdsnClient(source)]
+    else:
+        clients = default_clients
     
     net, sta, loc, cha = instrument_id.split('.')
     
-    # if data path exists, create file path names for day and day+1
-    if dataDir_get:
-        print("Fetching {} data from file".format(net))
-        fileName = '.'.join((instrument_id,'D',origin_time.strftime('%Y.%j')))
-        filePath = os.path.join(dataDir_get, origin_time.strftime('%Y'),
-                                net, sta, cha + '.D', fileName)
-        
-        origin_time2 = origin_time + 86400
-        fileName2 = '.'.join((instrument_id,'D',origin_time2.strftime('%Y.%j')))
-        filePath2 = os.path.join(dataDir_get, origin_time2.strftime('%Y'),
-                                net, sta, cha + '.D', fileName2)
-
-        # if full path exists, read in data, check if time extends to day+1
-        if os.path.isfile(filePath):
-            data_source = 'Archive'
-            if origin_time.hour > 21:
-                st = Stream()
-                st.extend(read(pathname_or_url = filePath, 
-                               starttime = origin_time - 180,
-                               endtime = origin_time + 3 * 3600))
-                st.extend(read(pathname_or_url = filePath2, 
-                               starttime = UTCDateTime(origin_time2.year,
-                                                       origin_time2.month,  
-                                                       origin_time2.day, 0, 0),
-                               endtime = origin_time + 3 * 3600))
-                st.merge(method=-1)
-            else:
-                st = read(pathname_or_url = filePath, 
-                          starttime = origin_time - 180,
-                          endtime = origin_time + 3 * 3600)    
-        else:
-            print("\tFile not found: \n\t {} \n".format(filePath))    
-    
-    # if data/path does not exist, try querying FDSN webservices
-    elif (not dataDir_get) or (not st):
-        for S in source:
-            try:
-                print("Fetching {} data from FDSN ({})".format(net,S))
-                c = fdsnClient(S)
-                st = c.get_waveforms(network=net, station=sta, location=loc, 
-                                    channel=cha, starttime=origin_time-190,
-                                    endtime=origin_time+3*3600+10)
-                break
-            except:
-                print("\tFailed")
-                pass
-        data_source = S 
+    st = None
+    source = None
+    for client in clients:
+        try:
+            source = client.sds_root
+        except AttributeError:
+            source = client.base_url
+        try:
+            print("Fetching {} data from: ({})".format(net, source))
+            st = client.get_waveforms(network=net, station=sta, location=loc,
+                                      channel=cha, starttime=origin_time-190,
+                                      endtime=origin_time+3*3600+10)
+        except Exception as e:
+            print("\tFailed: " + str(e))
+            pass
+        if st:
+            break
     
     if not st:
         raise RotationalProcessingException("Data not available for this event")
@@ -194,7 +182,7 @@ def download_data(origin_time, instrument_id, source):
     print("\tDownload of {!s} {!s} data successful".format(
               st[0].stats.station, st[0].stats.channel))
 
-    return st, data_source
+    return st, source
 
 
 def event_info_data(event, station, polarity, instrument):
@@ -241,15 +229,12 @@ def event_info_data(event, station, polarity, instrument):
         station_lat = 49.144001
         station_lon = 12.8782
 
-        source = ['http://eida.bgr.de', 
-                  'http://erde.geophysik.uni-muenchen.de']
-
         # ringlaser signal, source LMU first
         rotation_id = 'BW.RLAS..BJZ'
         if origin.time < UTCDateTime(2010, 4, 16):
             rotation_id = 'BW.RLAS..BAZ' 
 
-        rt,srcRT = download_data(startev, rotation_id, source[::-1])
+        rt,srcRT = download_data(startev, rotation_id)
         if polarity == 'reverse':
             rt[0].data *= -1
 
@@ -264,7 +249,7 @@ def event_info_data(event, station, polarity, instrument):
             elif instrument == 'LENNARTZ':
                 translation_id = 'BW.WETR..{}'.format(channels)
 
-            tr,srcTR = download_data(startev, translation_id, source)
+            tr,srcTR = download_data(startev, translation_id)
             data_sources[channels] = srcTR
             ac += tr
 
@@ -272,12 +257,9 @@ def event_info_data(event, station, polarity, instrument):
         station_lat = 48.162941
         station_lon = 11.275476
 
-        source = ['http://eida.bgr.de', 
-                  'http://erde.geophysik.uni-muenchen.de']
-
         # ringlaser signal, source LMU first
-        rotation_id = 'BW.ROMY..BJZ'
-        rt,srcRT = download_data(startev, rotation_id, source[::-1])
+        rotation_id = 'BW.ROMY.10.BJZ'
+        rt,srcRT = download_data(startev, rotation_id)
         if polarity.lower() == 'reverse':
             rt[0].data *= -1
 
@@ -288,7 +270,7 @@ def event_info_data(event, station, polarity, instrument):
         ac = Stream()
         for channels in ['BHN','BHE','BHZ']:
             translation_id = 'GR.FUR..{}'.format(channels)
-            tr,srcTR = download_data(startev, translation_id, source)
+            tr,srcTR = download_data(startev, translation_id)
             data_sources[channels] = srcTR
             ac += tr
         
@@ -2292,7 +2274,7 @@ if __name__ == '__main__':
                 try:
                     filename_json = os.path.join(folder_name,tag_name + '.json')
                     data = json.load(open(filename_json))
-                    if data['station_information_{}'.format(station)]:
+                    if data.get('station_information_{}'.format(station)):
                         print("This event was already processed\n")
                         already_processed += 1
                     else:
@@ -2302,6 +2284,9 @@ if __name__ == '__main__':
                             success_counter += 1
 
                         # if any error, remove folder, continue
+                        # XXX this needs to be done differently, because an
+                        # XXX error while processing one station might delete
+                        # XXX successful processing results of the other station
                         except Exception as e:
                             print(e)
                             print("Removing incomplete folder...\n")
@@ -2326,7 +2311,7 @@ if __name__ == '__main__':
 
             
             # event encountered for the first time, create folder, xml, process
-            elif not check_folder_exists:  
+            else:
                 os.makedirs(str(folder_name))
                 
                 # run processing function

@@ -21,6 +21,9 @@
 # 
 # m h  dom mon dow   command
 
-00 02 * * * python /path/to/RLDatabase/waveformCompare.py
+# process ROMY first since it seems more gappy and the processing script is
+# buggy right now and removes the whole event folder if the station can not be
+# processed
+00 02 * * * python /path/to/RLDatabase/waveformCompare.py --station ROMY; python /path/to/RLDatabase/waveformCompare.py --station RLAS
 
 00 03 * * * python /path/to/RLDatabase/event_upload_rotjane.py --timespan week
