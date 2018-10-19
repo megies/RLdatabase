@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 """04.10.17
 For interacting with Rotational Jane database:
 to upload events from event folders as quakeml files 
@@ -36,16 +37,14 @@ args = parser.parse_args()
 timespan = args.timespan
 
 # for attachments
-head_p1 = {'content-type': 'image/png',
-                 'category': 'Event Information'} 
-head_p2 = {'content-type': 'image/png',
-                 'category': 'Waveform Comparison'} 
-head_p3 = {'content-type': 'image/png',
-                 'category': 'Correlation/Backazimuth'} 
-head_p4 = {'content-type': 'image/png',
-                 'category': 'P-Coda Comparison'} 
+png_re_pattern = re.compile(r'.*_([a-zA-Z]+)_page_([0-9]).png$')
+png_page_category_map = {
+    1: 'Event Information',
+    2: 'Waveform Comparison',
+    3: 'Correlation/Backazimuth',
+    4: 'P-Coda Comparison'}
 headers_json = {'content-type': 'text/json',
-                 'category': 'Processing Results'} 
+                'category': 'Processing Results'}
 
 if timespan == 'week':
     # look for events in the past week
@@ -60,6 +59,8 @@ elif timespan == 'all':
     # initial population, grab all events in folder
     cat = glob.glob(os.path.join(OUTPUT_PATH, '*', '*', '*'))
     cat.sort(reverse=True)
+else:
+    raise ValueError("bad 'timespan' option: '%s'" % timespan)
     
 # ============================================================================
 
@@ -68,7 +69,16 @@ for event in cat:
     print(os.path.basename(event))
     try:
         os.chdir(event)
-        attachments = glob.glob('*')
+        attachments = sorted(glob.glob('*'))
+        xml_files = [filename for filename in attachments
+                     if filename.endswith('.xml')]
+
+        if len(xml_files) != 1:
+            error_list.append(event)
+            error_type.append('No xml file for event')
+            os.chdir('..')
+            continue
+        xml_file = xml_files[0]
 
         # check: full folder
         if len(attachments) < 6:
@@ -78,78 +88,73 @@ for event in cat:
             os.chdir('..')
             continue
 
-        # assign attachments (kinda hacky)
-        for J in attachments:
-            if '.json' in J:
-                json = J
-            elif '.xml' in J:
-                xml = J
-            elif '_page_1.png' in J:
-                page1 = J
-            elif '_page_2.png' in J:
-                page2 = J
-            elif '_page_3.png' in J:
-                page3 = J
-            elif '_page_4.png' in J:
-                page4 = J
-            else:
-                error_list.append(event)
-                error_type.append('Unidentified Attachment: {}'.format(J))
-
         # push quakeml file
-        with open(xml,'rb') as fh:
+        with open(xml_file,'rb') as fh:
             r = requests.put(
-                url=root_path + 'documents/quakeml/{}'.format(xml),
+                url=root_path + 'documents/quakeml/{}'.format(xml_file),
                 data=fh, **requests_kwargs)
-
-        # check: already uploaded (409) and check for incomplete folders
-        if r.status_code == 409:
-            r2 = requests.get(
-                url=root_path + 'documents/quakeml/{}'.format(xml),
-                **requests_kwargs)
-            assert r2.ok
-
-            try:
-                att_count = r2.json()['indices'][0]['attachments_count']
-                if att_count == 5:
-                    os.chdir('..')
-                    continue
-                elif att_count != 5:
-                    error_list.append(event)
-                    error_type.append('Already Uploaded; Attachment Count Error')
-                    os.chdir('..')
-                    continue
-            except IndexError:
-                error_list.append(event)
-                error_type.append('Already Uploaded; Attachment Count Error')
-                os.chdir('..')
-                continue
-
-        assert r.ok
 
         # find attachment url
         r = requests.get(
-                url=root_path + 'documents/quakeml/{}'.format(xml),
+                url=root_path + 'documents/quakeml/{}'.format(xml_file),
                 **requests_kwargs)
         assert r.ok
 
         attachment_url = r.json()['indices'][0]['attachments_url']
 
         # post image attachments            
-        for pngs,heads in zip([page1,page2,page3,page4],
-                                [head_p1,head_p2,head_p3,head_p4]):
-            with open(pngs,'rb') as fhp:
-                r = requests.post(url=attachment_url, headers=heads, data=fhp,
+        for filename in attachments:
+            if filename.endswith('.xml'):
+                continue
+            elif filename.endswith('.png'):
+                match = re.match(png_re_pattern, filename)
+                if not match:
+                    continue
+                station = match.group(1)
+                page_number = int(match.group(2))
+                category = '{} ({})'.format(
+                    png_page_category_map[page_number], station)
+                header = {'content-type': 'image/png',
+                          'category': category}
+            elif filename.endswith('.json'):
+                header = headers_json
+            else:
+                error_list.append(event)
+                error_type.append('Unidentified Attachment: {}'.format(J))
+
+            with open(filename, 'rb') as fh:
+                r = requests.post(url=attachment_url, headers=header, data=fh,
                                   **requests_kwargs)
-
             assert r.ok
 
-        # post .json
-        with open(json,'rb') as fhj:
-            r = requests.post(url=attachment_url, headers=headers_json,
-                              data=fhj, **requests_kwargs)
 
-            assert r.ok
+        # the following is not used for now, the whole checking logic was hard
+        # coded to a single station only and is pretty hacky.
+        # XXX # check: already uploaded (409) and check for incomplete folders
+        # XXX if r.status_code == 409:
+        # XXX     r2 = requests.get(
+        # XXX         url=root_path + 'documents/quakeml/{}'.format(xml),
+        # XXX         **requests_kwargs)
+        # XXX     assert r2.ok
+        # XXX
+        # XXX     try:
+        # XXX         att_count = r2.json()['indices'][0]['attachments_count']
+        # XXX         if att_count == 5:
+        # XXX             os.chdir('..')
+        # XXX             continue
+        # XXX         elif att_count != 5:
+        # XXX             error_list.append(event)
+        # XXX             error_type.append('Already Uploaded; Attachment Count Error')
+        # XXX             os.chdir('..')
+        # XXX             continue
+        # XXX     except IndexError:
+        # XXX         error_list.append(event)
+        # XXX         error_type.append('Already Uploaded; Attachment Count Error')
+        # XXX         os.chdir('..')
+        # XXX         continue
+        # XXX
+        # XXX assert r.ok
+
 
         os.chdir('..')
 
