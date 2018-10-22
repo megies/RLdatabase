@@ -2181,6 +2181,9 @@ if __name__ == '__main__':
     parser.add_argument('--max_datetime', help='Latest date and time for \
         the search (default is today).',type=str, default=str(
                                                     datetime.datetime.now()))
+    parser.add_argument('-f', '--force-reprocess', action='store_true',
+                        default=False,
+                        help='Force reprocessing of already processed events.')
 
     args = parser.parse_args()
     station = args.station
@@ -2265,6 +2268,12 @@ if __name__ == '__main__':
         print("{} of {} event(s)".format(event_counter,len(cat)))
         try:
             tag_name, folder_name, check_folder_exists = generate_tags(event)
+            if check_folder_exists and args.force_reprocess:
+                print("This event was processed. Reprocessing requested, "
+                      "deleting old data folders: %s\n" % check_folder_exists)
+                for folder in check_folder_exists:
+                    shutil.rmtree(folder)
+                check_folder_exists = []
             # check if current event folder exists
             if check_folder_exists:
                 # check if event source is the same, assumes 0 or 1 files found
