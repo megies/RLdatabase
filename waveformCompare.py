@@ -87,6 +87,8 @@ from obspy.signal.rotate import rotate_ne_rt
 from obspy.core.utcdatetime import UTCDateTime
 from obspy.core.util.attribdict import AttribDict
 from obspy.clients.fdsn import Client as fdsnClient
+from obspy.clients.fdsn.header import FDSNException
+from obspy.clients.filesystem.sds import Client as SDSClient
 from obspy.signal.cross_correlation import correlate
 from obspy.geodetics.base import gps2dist_azimuth, locations2degrees
 
@@ -97,6 +99,23 @@ from obspy.geodetics.base import gps2dist_azimuth, locations2degrees
 
 # if matplotlib.__version__ < '1.0':  # Matplotlib 1.0 or newer is necessary
 #     raise ValueError('I need Matplotlib version 1.0 or newer.')
+default_clients = []
+for sds_root in ('/freenas-ffb-01/romy_archive',
+                 '/bay200/mseed_online/archive',
+                 '/import/netapp-m-02-bay200/mseed_online/archive'):
+    try:
+        default_clients.append(SDSClient(sds_root))
+    except IOError:
+        pass
+for fdsn_url in ('http://george.geophysik.uni-muenchen.de',
+                 'http://jane.geophysik.uni-muenchen.de',
+                 'http://erde.geophysik.uni-muenchen.de',
+                 'http://eida.bgr.de'):
+    try:
+        default_clients.append(fdsnClient(fdsn_url))
+    except FDSNException:
+        pass
+
 
 class RotationalProcessingException(Exception):
 
@@ -105,7 +124,7 @@ class RotationalProcessingException(Exception):
     """
     pass
 
-def download_data(origin_time, instrument_id, source):
+def download_data(origin_time, instrument_id, source=None):
 
     """
     Downloads channel data from for the desired event day and origin time.
@@ -120,71 +139,40 @@ def download_data(origin_time, instrument_id, source):
     :param origin_time: event origin time.
     :type instrument_id: str
     :param net: FDSN SEED name for channel (i.e. `BW.RLAS..BJZ`)
-    :type soure: list of str's
-    :param source: list of URL's of FDSN webservices.
+    :type source: str
+    :param source: URL of FDSN webservice to use. If ``None``, then first
+        internal SDS is checked otherwise appropriate FDSN web services are
+        checked.
     :rtype st: :class: `~obspy.core.stream.Stream`
-    :return st: data fetched as a stream object.    
-    :rtype data_source: str
-    :return data_source: Source where data was fetched successfully 
+    :return st: data fetched as a stream object.
+    :rtype source: str
+    :return source: Source where data was fetched successfully
     """
-
     # check paths to see if running on FFB, LMU or neither
-    st = None
-    dataDir_get = '/bay200/mseed_online/archive/' #FFB
-    if not os.path.exists(dataDir_get):
-        dataDir_get = '/import/netapp-m-02-bay200/mseed_online/archive/'#LMU            
-    if not os.path.exists(dataDir_get):
-        dataDir_get = None
+    if source is not None:
+        clients = [fdsnClient(source)]
+    else:
+        clients = default_clients
     
     net, sta, loc, cha = instrument_id.split('.')
     
-    # if data path exists, create file path names for day and day+1
-    if dataDir_get:
-        print("Fetching {} data from file".format(net))
-        fileName = '.'.join((instrument_id,'D',origin_time.strftime('%Y.%j')))
-        filePath = os.path.join(dataDir_get, origin_time.strftime('%Y'),
-                                net, sta, cha + '.D', fileName)
-        
-        origin_time2 = origin_time + 86400
-        fileName2 = '.'.join((instrument_id,'D',origin_time2.strftime('%Y.%j')))
-        filePath2 = os.path.join(dataDir_get, origin_time2.strftime('%Y'),
-                                net, sta, cha + '.D', fileName2)
-
-        # if full path exists, read in data, check if time extends to day+1
-        if os.path.isfile(filePath):
-            data_source = 'Archive'
-            if origin_time.hour > 21:
-                st = Stream()
-                st.extend(read(pathname_or_url = filePath, 
-                               starttime = origin_time - 180,
-                               endtime = origin_time + 3 * 3600))
-                st.extend(read(pathname_or_url = filePath2, 
-                               starttime = UTCDateTime(origin_time2.year,
-                                                       origin_time2.month,  
-                                                       origin_time2.day, 0, 0),
-                               endtime = origin_time + 3 * 3600))
-                st.merge(method=-1)
-            else:
-                st = read(pathname_or_url = filePath, 
-                          starttime = origin_time - 180,
-                          endtime = origin_time + 3 * 3600)    
-        else:
-            print("\tFile not found: \n\t {} \n".format(filePath))    
-    
-    # if data/path does not exist, try querying FDSN webservices
-    elif (not dataDir_get) or (not st):
-        for S in source:
-            try:
-                print("Fetching {} data from FDSN ({})".format(net,S))
-                c = fdsnClient(S)
-                st = c.get_waveforms(network=net, station=sta, location=loc, 
-                                    channel=cha, starttime=origin_time-190,
-                                    endtime=origin_time+3*3600+10)
-                break
-            except:
-                print("\tFailed")
-                pass
-        data_source = S 
+    st = None
+    source = None
+    for client in clients:
+        try:
+            source = client.sds_root
+        except AttributeError:
+            source = client.base_url
+        try:
+            print("Fetching {} data from: ({})".format(net, source))
+            st = client.get_waveforms(network=net, station=sta, location=loc,
+                                      channel=cha, starttime=origin_time-190,
+                                      endtime=origin_time+3*3600+10)
+        except Exception as e:
+            print("\tFailed: " + str(e))
+            pass
+        if st:
+            break
     
     if not st:
         raise RotationalProcessingException("Data not available for this event")
@@ -194,7 +182,7 @@ def download_data(origin_time, instrument_id, source):
     print("\tDownload of {!s} {!s} data successful".format(
               st[0].stats.station, st[0].stats.channel))
 
-    return st, data_source
+    return st, source
 
 
 def event_info_data(event, station, polarity, instrument):
@@ -241,15 +229,12 @@ def event_info_data(event, station, polarity, instrument):
         station_lat = 49.144001
         station_lon = 12.8782
 
-        source = ['http://eida.bgr.de', 
-                  'http://erde.geophysik.uni-muenchen.de']
-
         # ringlaser signal, source LMU first
         rotation_id = 'BW.RLAS..BJZ'
         if origin.time < UTCDateTime(2010, 4, 16):
             rotation_id = 'BW.RLAS..BAZ' 
 
-        rt,srcRT = download_data(startev, rotation_id, source[::-1])
+        rt,srcRT = download_data(startev, rotation_id)
         if polarity == 'reverse':
             rt[0].data *= -1
 
@@ -264,7 +249,7 @@ def event_info_data(event, station, polarity, instrument):
             elif instrument == 'LENNARTZ':
                 translation_id = 'BW.WETR..{}'.format(channels)
 
-            tr,srcTR = download_data(startev, translation_id, source)
+            tr,srcTR = download_data(startev, translation_id)
             data_sources[channels] = srcTR
             ac += tr
 
@@ -272,12 +257,9 @@ def event_info_data(event, station, polarity, instrument):
         station_lat = 48.162941
         station_lon = 11.275476
 
-        source = ['http://eida.bgr.de', 
-                  'http://erde.geophysik.uni-muenchen.de']
-
         # ringlaser signal, source LMU first
-        rotation_id = 'BW.ROMY..BJZ'
-        rt,srcRT = download_data(startev, rotation_id, source[::-1])
+        rotation_id = 'BW.ROMY.10.BJZ'
+        rt,srcRT = download_data(startev, rotation_id)
         if polarity.lower() == 'reverse':
             rt[0].data *= -1
 
@@ -288,7 +270,7 @@ def event_info_data(event, station, polarity, instrument):
         ac = Stream()
         for channels in ['BHN','BHE','BHZ']:
             translation_id = 'GR.FUR..{}'.format(channels)
-            tr,srcTR = download_data(startev, translation_id, source)
+            tr,srcTR = download_data(startev, translation_id)
             data_sources[channels] = srcTR
             ac += tr
         
@@ -1605,15 +1587,17 @@ def plot_waveform_comp(event, station, mode, folder_name, tag_name):
     # phase velocity, factor for displacing rotation rate, and time array
     c1 = .5 * max(abs(trv_acc[0].data)) / max(abs(rt[0].data))  
     fact1 = 2 * max(rt[0].data)  
-    time = rt[0].stats.delta * np.arange(0, len(rt[0].data))
+    reftime = rt[0].stats.starttime
 
     # main figure
     plt.figure(figsize=(18, 9))
     plt.subplot2grid((6, 5), (2, 0), colspan=5, rowspan=2)
-    plt.plot(time, rt[0].data, color='r', label=r'Rotation rate')
-    plt.plot(time, (0.5 / c1) * trv_acc[0].data + fact1, 
-                                color='k', label=r'Transversal acceleration')
-    plt.xlabel(r'Time [s]', fontweight='bold', fontsize=13)
+    plt.plot(rt[0].times(reftime=reftime), rt[0].data, color='r',
+             label=r'Rotation rate (%s)' % rt[0].id)
+    plt.plot(trv_acc[0].times(reftime=reftime),
+             (0.5 / c1) * trv_acc[0].data + fact1,
+             color='k', label=r'Transversal acceleration (%s)' % trv_acc[0].id)
+    plt.xlabel(r'Time after %s [s]' % reftime, fontweight='bold', fontsize=13)
     plt.ylabel(
         r'$\dot{\mathbf{\Omega}}_\mathbf{z}$ [nrad/s] - a$_\mathbf{T}$/2c'
         '[1/s]', fontweight='bold', fontsize=13)
@@ -1646,7 +1630,7 @@ def plot_waveform_comp(event, station, mode, folder_name, tag_name):
     plt.title(r'Ring laser and broadband seismometer recordings. Event: %s %sZ'
               % (startev.date, startev.time))
     plt.grid(True)
-    plt.legend(loc=7,shadow=True)
+    plt.legend(loc='center right', shadow=True)
 
     # =============================== P coda ===============================
     plt.subplot2grid((6, 5), (0, 0), colspan=2)
@@ -1671,11 +1655,11 @@ def plot_waveform_comp(event, station, mode, folder_name, tag_name):
     min_rt_pcod = min(rt_pcoda_coarse[0].data[min_pw_rt:max_pw_rt])
     max_rt_pcod = max(rt_pcoda_coarse[0].data[min_pw_rt:max_pw_rt])
 
-    plt.plot(time, rt_pcoda_coarse[0].data, color='r')
-    plt.plot(time, (0.5 / cp) * trv_pcoda_coarse[0], color='k')
+    plt.plot(rt_pcoda_coarse[0].times(reftime=reftime), rt_pcoda_coarse[0].data, color='r')
+    plt.plot(trv_pcoda_coarse[0].times(reftime=reftime), (0.5 / cp) * trv_pcoda_coarse[0], color='k')
     plt.xlim(min_pw, max_pw)
     plt.ylim(min([min_ta_pcod, min_ta_pcod]), max([max_rt_pcod, max_rt_pcod]))
-    plt.xlabel(r'Time [s]', fontweight='bold', fontsize=11)
+    plt.xlabel(r'Time after %s [s]' % reftime, fontweight='bold', fontsize=11)
     plt.ylabel(
         r'$\dot{\mathbf{\Omega}}_\mathbf{z}$ [nrad/s] - a$_\mathbf{T}$/2c'
         '[1/s]', fontweight='bold', fontsize=11)
@@ -1697,11 +1681,11 @@ def plot_waveform_comp(event, station, mode, folder_name, tag_name):
     min_ta_s = min((0.5 / cs) * trv_acc[0].data[min_sw_rt:max_sw_rt])
     max_ta_s = max((0.5 / cs) * trv_acc[0].data[min_sw_rt:max_sw_rt])
 
-    plt.plot(time, rt[0].data, color='r')
-    plt.plot(time, (0.5 / cs) * trv_acc[0].data, color='k')
+    plt.plot(rt[0].times(reftime=reftime), rt[0].data, color='r')
+    plt.plot(trv_acc[0].times(reftime=reftime), (0.5 / cs) * trv_acc[0].data, color='k')
     plt.xlim(min_sw, max_sw)
     plt.ylim(min([min_ta_s, min_rt_s]), max([max_ta_s, max_rt_s]))
-    plt.xlabel(r'Time [s]', fontweight='bold', fontsize=11)
+    plt.xlabel(r'Time after %s [s]' % reftime, fontweight='bold', fontsize=11)
     plt.ylabel(
         r'$\dot{\mathbf{\Omega}}_\mathbf{z}$ [nrad/s] - a$_\mathbf{T}$/2c'
         '[1/s]', fontweight='bold', fontsize=11)
@@ -1723,11 +1707,11 @@ def plot_waveform_comp(event, station, mode, folder_name, tag_name):
     min_ta_lwi = min((0.5 / cl1) * trv_acc[0].data[min_lwi_rt:max_lwi_rt])
     max_ta_lwi = max((0.5 / cl1) * trv_acc[0].data[min_lwi_rt:max_lwi_rt])
 
-    plt.plot(time, rt[0].data, color='r')
-    plt.plot(time, (0.5 / cl1) * trv_acc[0].data, color='k')
+    plt.plot(rt[0].times(reftime=reftime), rt[0].data, color='r')
+    plt.plot(trv_acc[0].times(reftime=reftime), (0.5 / cl1) * trv_acc[0].data, color='k')
     plt.xlim(min_lwi, max_lwi)
     plt.ylim(min([min_rt_lwi, min_ta_lwi]),max([max_rt_lwi, max_ta_lwi]))
-    plt.xlabel(r'Time [s]', fontweight='bold', fontsize=11)
+    plt.xlabel(r'Time after %s [s]' % reftime, fontweight='bold', fontsize=11)
     plt.ylabel(
         r'$\dot{\mathbf{\Omega}}_\mathbf{z}$ [rad/s] - a$_\mathbf{T}$/2c'
         '[1/s]', fontweight='bold', fontsize=11)
@@ -1750,11 +1734,11 @@ def plot_waveform_comp(event, station, mode, folder_name, tag_name):
     min_ta_lwf = min((0.5 / cl2) * trv_acc[0].data[min_lwf_rt:max_lwf_rt])
     max_ta_lwf = max((0.5 / cl2) * trv_acc[0].data[min_lwf_rt:max_lwf_rt])
 
-    plt.plot(time, rt[0].data, color='r')
-    plt.plot(time, (0.5 / cl2) * trv_acc[0].data, color='k')
+    plt.plot(rt[0].times(reftime=reftime), rt[0].data, color='r')
+    plt.plot(trv_acc[0].times(reftime=reftime), (0.5 / cl2) * trv_acc[0].data, color='k')
     plt.xlim(min_lwf, max_lwf)
     plt.ylim(min([min_rt_lwf, min_ta_lwf]),max([max_rt_lwf, max_ta_lwf]))
-    plt.xlabel(r'Time [s]', fontsize=11, fontweight='bold')
+    plt.xlabel(r'Time after %s [s]' % reftime, fontsize=11, fontweight='bold')
     plt.ylabel(
         r'$\dot{\mathbf{\Omega}}_\mathbf{z}$ [rad/s] - a$_\mathbf{T}$/2c'
                                         '[1/s]', fontsize=11, fontweight='bold')
@@ -1834,9 +1818,9 @@ def plot_waveform_comp(event, station, mode, folder_name, tag_name):
     # subplot 1
     plt.figure(figsize=(18, 9))
     plt.subplot2grid((4, 26), (0, 0), colspan=25)
-    plt.plot(time, rt[0].data, color='r', label=r'Rotation rate')
-    plt.plot(time, (1. / (2. * c1)) * trv_acc[0].data + fact1, 
-                                color='k', label=r'Transversal acceleration')
+    plt.plot(rt[0].times(reftime=reftime), rt[0].data, color='r', label=r'Rotation rate (%s)' % rt[0].id)
+    plt.plot(trv_acc[0].times(reftime=reftime), (1. / (2. * c1)) * trv_acc[0].data + fact1, 
+                                color='k', label=r'Transversal acceleration (%s)' % trv_acc[0].id)
     plt.ylabel(
         r'$\dot{\mathbf{\Omega}}_\mathbf{z}$ [nrad/s] - a$_\mathbf{T}$/2c '
         '[1/s]', fontsize=10, fontweight='bold')
@@ -1846,7 +1830,7 @@ def plot_waveform_comp(event, station, mode, folder_name, tag_name):
                           'time windows (lowpass, cutoff: %s Hz). Event: %s %sZ'
                           % (sec, cutoff, startev.date, startev.time))
     plt.grid(True)
-    plt.legend(loc=7,shadow=True)
+    plt.legend(loc='center right', shadow=True)
 
     # subplot 2
     plt.subplot2grid((4, 26), (1, 0), colspan=25)
@@ -1881,7 +1865,9 @@ def plot_waveform_comp(event, station, mode, folder_name, tag_name):
     else:
         shift75 = 10
 
-    plt.text(time[len(time) - 1] + shift75, 0.71, r'0.75', color='red')
+    # XXX super ugly placement of axis annotation.. should be done with axis
+    # coordinates in x direction (matplotlib blended transform)
+    plt.text(rt[0].times(reftime=reftime)[-1] + shift75, 0.71, r'0.75', color='red')
     plt.xlim(0, rt[0].stats.delta * len(rt[0].data))
 
     min_corr = min(min(max_coefs_10deg), min(corrcoefs))
@@ -1971,7 +1957,7 @@ def plot_waveform_comp(event, station, mode, folder_name, tag_name):
                                             rt_pcoda_cut, ac_pcoda_cut, sec_p)
 
     # set up arrays for plotting
-    time_p = rt_pcoda_cut[0].stats.delta * np.arange(0, len(rt_pcoda[0].data))
+    reftime_p = rt_pcoda_cut[0].stats.starttime
     fact1_p = 2 * max(rt_pcoda[0].data[0:max_lwi_ac])
 
     c1_p = .5 * (max(abs(trv_pcoda[0].data[0:max_lwi_ac])) /
@@ -2000,7 +1986,7 @@ def plot_waveform_comp(event, station, mode, folder_name, tag_name):
     # subplot 1
     plt.figure(figsize=(18, 9))
     plt.subplot2grid((5, 26), (0, 0), colspan=25)
-    plt.plot(time_p, acZ_pcoda[0].data, color='g')
+    plt.plot(acZ_pcoda[0].times(reftime=reftime_p), acZ_pcoda[0].data, color='g')
     plt.ylabel(r'a$_\mathbf{Z}$ [nm/s$^2$]', fontweight='bold', fontsize=11)
     plt.ticklabel_format(axis='y', style='sci', scilimits=(-2,2))
     plt.xlim(0, (min_lwi + max_lwi) // 2)
@@ -2018,9 +2004,11 @@ def plot_waveform_comp(event, station, mode, folder_name, tag_name):
     xlim2 = (min_lwi + max_lwi) // 2
     plt.subplot2grid((5, 26), (1, 0), colspan=25, rowspan=2)
 
-    plt.plot(time_p, rt_pcoda[0].data, color='r', label=r'Rotation rate')
-    plt.plot(time_p, (0.5 / c1_p) * trv_pcoda[0].data + fact1_p, color='k',
-                                             label=r'Transversal acceleration')
+    plt.plot(rt_pcoda[0].times(reftime=reftime_p),
+             rt_pcoda[0].data, color='r', label=r'Rotation rate (%s)' % rt_pcoda[0].id)
+    plt.plot(trv_pcoda[0].times(reftime=reftime_p),
+             (0.5 / c1_p) * trv_pcoda[0].data + fact1_p, color='k',
+             label=r'Transversal acceleration (%s)' % trv_pcoda[0].id)
     plt.ylabel(r'$\dot{\mathbf{\Omega}}_\mathbf{z}$ [nrad/s] -'
                    'a$_\mathbf{T}$/2c [1/s]', fontweight='bold', fontsize=11)
     plt.xlim(0, xlim2)
@@ -2039,7 +2027,7 @@ def plot_waveform_comp(event, station, mode, folder_name, tag_name):
                             xy=(min_sw+xgap*float(xlim2/xlim1),box_yposition2), 
                             fontsize=14,fontweight='bold', bbox=bbox_props)
     plt.grid(True)
-    plt.legend(loc=6, shadow=True)
+    plt.legend(loc='center right', shadow=True)
 
     # subplot 3
     plt.subplot2grid((5, 26), (3, 0), colspan=25)
@@ -2193,6 +2181,9 @@ if __name__ == '__main__':
     parser.add_argument('--max_datetime', help='Latest date and time for \
         the search (default is today).',type=str, default=str(
                                                     datetime.datetime.now()))
+    parser.add_argument('-f', '--force-reprocess', action='store_true',
+                        default=False,
+                        help='Force reprocessing of already processed events.')
 
     args = parser.parse_args()
     station = args.station
@@ -2277,6 +2268,12 @@ if __name__ == '__main__':
         print("{} of {} event(s)".format(event_counter,len(cat)))
         try:
             tag_name, folder_name, check_folder_exists = generate_tags(event)
+            if check_folder_exists and args.force_reprocess:
+                print("This event was processed. Reprocessing requested, "
+                      "deleting old data folders: %s\n" % check_folder_exists)
+                for folder in check_folder_exists:
+                    shutil.rmtree(folder)
+                check_folder_exists = []
             # check if current event folder exists
             if check_folder_exists:
                 # check if event source is the same, assumes 0 or 1 files found
@@ -2292,7 +2289,7 @@ if __name__ == '__main__':
                 try:
                     filename_json = os.path.join(folder_name,tag_name + '.json')
                     data = json.load(open(filename_json))
-                    if data['station_information_{}'.format(station)]:
+                    if data.get('station_information_{}'.format(station)):
                         print("This event was already processed\n")
                         already_processed += 1
                     else:
@@ -2302,6 +2299,9 @@ if __name__ == '__main__':
                             success_counter += 1
 
                         # if any error, remove folder, continue
+                        # XXX this needs to be done differently, because an
+                        # XXX error while processing one station might delete
+                        # XXX successful processing results of the other station
                         except Exception as e:
                             print(e)
                             print("Removing incomplete folder...\n")
@@ -2326,7 +2326,7 @@ if __name__ == '__main__':
 
             
             # event encountered for the first time, create folder, xml, process
-            elif not check_folder_exists:  
+            else:
                 os.makedirs(str(folder_name))
                 
                 # run processing function
