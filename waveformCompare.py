@@ -490,6 +490,8 @@ def remove_instr_resp(rt, ac, rt_pcoda, ac_pcoda, station, startev):
         raise RotationalProcessingException("Invalid station")
 
     # make sure start and endtimes match for both instruments, if not, trim
+    # XXX the following code fails when there are gaps in the data, needs to be
+    # XXX rewritten ('startime is larger than endtime')
     startaim = max([tr.stats.starttime for tr in (ac + rt)])
     endtaim = min([tr.stats.endtime for tr in (ac + rt)])
     ac.trim(startaim, endtaim, nearest_sample=True)
