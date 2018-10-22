@@ -1630,7 +1630,7 @@ def plot_waveform_comp(event, station, mode, folder_name, tag_name):
     plt.title(r'Ring laser and broadband seismometer recordings. Event: %s %sZ'
               % (startev.date, startev.time))
     plt.grid(True)
-    plt.legend(loc=7,shadow=True)
+    plt.legend(loc='center right', shadow=True)
 
     # =============================== P coda ===============================
     plt.subplot2grid((6, 5), (0, 0), colspan=2)
@@ -1830,7 +1830,7 @@ def plot_waveform_comp(event, station, mode, folder_name, tag_name):
                           'time windows (lowpass, cutoff: %s Hz). Event: %s %sZ'
                           % (sec, cutoff, startev.date, startev.time))
     plt.grid(True)
-    plt.legend(loc=7,shadow=True)
+    plt.legend(loc='center right', shadow=True)
 
     # subplot 2
     plt.subplot2grid((4, 26), (1, 0), colspan=25)
@@ -2027,7 +2027,7 @@ def plot_waveform_comp(event, station, mode, folder_name, tag_name):
                             xy=(min_sw+xgap*float(xlim2/xlim1),box_yposition2), 
                             fontsize=14,fontweight='bold', bbox=bbox_props)
     plt.grid(True)
-    plt.legend(loc=6, shadow=True)
+    plt.legend(loc='center right', shadow=True)
 
     # subplot 3
     plt.subplot2grid((5, 26), (3, 0), colspan=25)
