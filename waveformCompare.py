@@ -1587,15 +1587,17 @@ def plot_waveform_comp(event, station, mode, folder_name, tag_name):
     # phase velocity, factor for displacing rotation rate, and time array
     c1 = .5 * max(abs(trv_acc[0].data)) / max(abs(rt[0].data))  
     fact1 = 2 * max(rt[0].data)  
-    time = rt[0].stats.delta * np.arange(0, len(rt[0].data))
+    reftime = rt[0].stats.starttime
 
     # main figure
     plt.figure(figsize=(18, 9))
     plt.subplot2grid((6, 5), (2, 0), colspan=5, rowspan=2)
-    plt.plot(time, rt[0].data, color='r', label=r'Rotation rate')
-    plt.plot(time, (0.5 / c1) * trv_acc[0].data + fact1, 
-                                color='k', label=r'Transversal acceleration')
-    plt.xlabel(r'Time [s]', fontweight='bold', fontsize=13)
+    plt.plot(rt[0].times(reftime=reftime), rt[0].data, color='r',
+             label=r'Rotation rate (%s)' % rt[0].id)
+    plt.plot(trv_acc[0].times(reftime=reftime),
+             (0.5 / c1) * trv_acc[0].data + fact1,
+             color='k', label=r'Transversal acceleration (%s)' % trv_acc[0].id)
+    plt.xlabel(r'Time after %s [s]' % reftime, fontweight='bold', fontsize=13)
     plt.ylabel(
         r'$\dot{\mathbf{\Omega}}_\mathbf{z}$ [nrad/s] - a$_\mathbf{T}$/2c'
         '[1/s]', fontweight='bold', fontsize=13)
@@ -1653,11 +1655,11 @@ def plot_waveform_comp(event, station, mode, folder_name, tag_name):
     min_rt_pcod = min(rt_pcoda_coarse[0].data[min_pw_rt:max_pw_rt])
     max_rt_pcod = max(rt_pcoda_coarse[0].data[min_pw_rt:max_pw_rt])
 
-    plt.plot(time, rt_pcoda_coarse[0].data, color='r')
-    plt.plot(time, (0.5 / cp) * trv_pcoda_coarse[0], color='k')
+    plt.plot(rt_pcoda_coarse[0].times(reftime=reftime), rt_pcoda_coarse[0].data, color='r')
+    plt.plot(trv_pcoda_coarse[0].times(reftime=reftime), (0.5 / cp) * trv_pcoda_coarse[0], color='k')
     plt.xlim(min_pw, max_pw)
     plt.ylim(min([min_ta_pcod, min_ta_pcod]), max([max_rt_pcod, max_rt_pcod]))
-    plt.xlabel(r'Time [s]', fontweight='bold', fontsize=11)
+    plt.xlabel(r'Time after %s [s]' % reftime, fontweight='bold', fontsize=11)
     plt.ylabel(
         r'$\dot{\mathbf{\Omega}}_\mathbf{z}$ [nrad/s] - a$_\mathbf{T}$/2c'
         '[1/s]', fontweight='bold', fontsize=11)
@@ -1679,11 +1681,11 @@ def plot_waveform_comp(event, station, mode, folder_name, tag_name):
     min_ta_s = min((0.5 / cs) * trv_acc[0].data[min_sw_rt:max_sw_rt])
     max_ta_s = max((0.5 / cs) * trv_acc[0].data[min_sw_rt:max_sw_rt])
 
-    plt.plot(time, rt[0].data, color='r')
-    plt.plot(time, (0.5 / cs) * trv_acc[0].data, color='k')
+    plt.plot(rt[0].times(reftime=reftime), rt[0].data, color='r')
+    plt.plot(trv_acc[0].times(reftime=reftime), (0.5 / cs) * trv_acc[0].data, color='k')
     plt.xlim(min_sw, max_sw)
     plt.ylim(min([min_ta_s, min_rt_s]), max([max_ta_s, max_rt_s]))
-    plt.xlabel(r'Time [s]', fontweight='bold', fontsize=11)
+    plt.xlabel(r'Time after %s [s]' % reftime, fontweight='bold', fontsize=11)
     plt.ylabel(
         r'$\dot{\mathbf{\Omega}}_\mathbf{z}$ [nrad/s] - a$_\mathbf{T}$/2c'
         '[1/s]', fontweight='bold', fontsize=11)
@@ -1705,11 +1707,11 @@ def plot_waveform_comp(event, station, mode, folder_name, tag_name):
     min_ta_lwi = min((0.5 / cl1) * trv_acc[0].data[min_lwi_rt:max_lwi_rt])
     max_ta_lwi = max((0.5 / cl1) * trv_acc[0].data[min_lwi_rt:max_lwi_rt])
 
-    plt.plot(time, rt[0].data, color='r')
-    plt.plot(time, (0.5 / cl1) * trv_acc[0].data, color='k')
+    plt.plot(rt[0].times(reftime=reftime), rt[0].data, color='r')
+    plt.plot(trv_acc[0].times(reftime=reftime), (0.5 / cl1) * trv_acc[0].data, color='k')
     plt.xlim(min_lwi, max_lwi)
     plt.ylim(min([min_rt_lwi, min_ta_lwi]),max([max_rt_lwi, max_ta_lwi]))
-    plt.xlabel(r'Time [s]', fontweight='bold', fontsize=11)
+    plt.xlabel(r'Time after %s [s]' % reftime, fontweight='bold', fontsize=11)
     plt.ylabel(
         r'$\dot{\mathbf{\Omega}}_\mathbf{z}$ [rad/s] - a$_\mathbf{T}$/2c'
         '[1/s]', fontweight='bold', fontsize=11)
@@ -1732,11 +1734,11 @@ def plot_waveform_comp(event, station, mode, folder_name, tag_name):
     min_ta_lwf = min((0.5 / cl2) * trv_acc[0].data[min_lwf_rt:max_lwf_rt])
     max_ta_lwf = max((0.5 / cl2) * trv_acc[0].data[min_lwf_rt:max_lwf_rt])
 
-    plt.plot(time, rt[0].data, color='r')
-    plt.plot(time, (0.5 / cl2) * trv_acc[0].data, color='k')
+    plt.plot(rt[0].times(reftime=reftime), rt[0].data, color='r')
+    plt.plot(trv_acc[0].times(reftime=reftime), (0.5 / cl2) * trv_acc[0].data, color='k')
     plt.xlim(min_lwf, max_lwf)
     plt.ylim(min([min_rt_lwf, min_ta_lwf]),max([max_rt_lwf, max_ta_lwf]))
-    plt.xlabel(r'Time [s]', fontsize=11, fontweight='bold')
+    plt.xlabel(r'Time after %s [s]' % reftime, fontsize=11, fontweight='bold')
     plt.ylabel(
         r'$\dot{\mathbf{\Omega}}_\mathbf{z}$ [rad/s] - a$_\mathbf{T}$/2c'
                                         '[1/s]', fontsize=11, fontweight='bold')
@@ -1816,9 +1818,9 @@ def plot_waveform_comp(event, station, mode, folder_name, tag_name):
     # subplot 1
     plt.figure(figsize=(18, 9))
     plt.subplot2grid((4, 26), (0, 0), colspan=25)
-    plt.plot(time, rt[0].data, color='r', label=r'Rotation rate')
-    plt.plot(time, (1. / (2. * c1)) * trv_acc[0].data + fact1, 
-                                color='k', label=r'Transversal acceleration')
+    plt.plot(rt[0].times(reftime=reftime), rt[0].data, color='r', label=r'Rotation rate (%s)' % rt[0].id)
+    plt.plot(trv_acc[0].times(reftime=reftime), (1. / (2. * c1)) * trv_acc[0].data + fact1, 
+                                color='k', label=r'Transversal acceleration (%s)' % trv_acc[0].id)
     plt.ylabel(
         r'$\dot{\mathbf{\Omega}}_\mathbf{z}$ [nrad/s] - a$_\mathbf{T}$/2c '
         '[1/s]', fontsize=10, fontweight='bold')
@@ -1863,7 +1865,9 @@ def plot_waveform_comp(event, station, mode, folder_name, tag_name):
     else:
         shift75 = 10
 
-    plt.text(time[len(time) - 1] + shift75, 0.71, r'0.75', color='red')
+    # XXX super ugly placement of axis annotation.. should be done with axis
+    # coordinates in x direction (matplotlib blended transform)
+    plt.text(rt[0].times(reftime=reftime)[-1] + shift75, 0.71, r'0.75', color='red')
     plt.xlim(0, rt[0].stats.delta * len(rt[0].data))
 
     min_corr = min(min(max_coefs_10deg), min(corrcoefs))
@@ -1953,7 +1957,7 @@ def plot_waveform_comp(event, station, mode, folder_name, tag_name):
                                             rt_pcoda_cut, ac_pcoda_cut, sec_p)
 
     # set up arrays for plotting
-    time_p = rt_pcoda_cut[0].stats.delta * np.arange(0, len(rt_pcoda[0].data))
+    reftime_p = rt_pcoda_cut[0].stats.starttime
     fact1_p = 2 * max(rt_pcoda[0].data[0:max_lwi_ac])
 
     c1_p = .5 * (max(abs(trv_pcoda[0].data[0:max_lwi_ac])) /
@@ -1982,7 +1986,7 @@ def plot_waveform_comp(event, station, mode, folder_name, tag_name):
     # subplot 1
     plt.figure(figsize=(18, 9))
     plt.subplot2grid((5, 26), (0, 0), colspan=25)
-    plt.plot(time_p, acZ_pcoda[0].data, color='g')
+    plt.plot(acZ_pcoda[0].times(reftime=reftime_p), acZ_pcoda[0].data, color='g')
     plt.ylabel(r'a$_\mathbf{Z}$ [nm/s$^2$]', fontweight='bold', fontsize=11)
     plt.ticklabel_format(axis='y', style='sci', scilimits=(-2,2))
     plt.xlim(0, (min_lwi + max_lwi) // 2)
@@ -2000,9 +2004,11 @@ def plot_waveform_comp(event, station, mode, folder_name, tag_name):
     xlim2 = (min_lwi + max_lwi) // 2
     plt.subplot2grid((5, 26), (1, 0), colspan=25, rowspan=2)
 
-    plt.plot(time_p, rt_pcoda[0].data, color='r', label=r'Rotation rate')
-    plt.plot(time_p, (0.5 / c1_p) * trv_pcoda[0].data + fact1_p, color='k',
-                                             label=r'Transversal acceleration')
+    plt.plot(rt_pcoda[0].times(reftime=reftime_p),
+             rt_pcoda[0].data, color='r', label=r'Rotation rate (%s)' % rt_pcoda[0].id)
+    plt.plot(trv_pcoda[0].times(reftime=reftime_p),
+             (0.5 / c1_p) * trv_pcoda[0].data + fact1_p, color='k',
+             label=r'Transversal acceleration (%s)' % trv_pcoda[0].id)
     plt.ylabel(r'$\dot{\mathbf{\Omega}}_\mathbf{z}$ [nrad/s] -'
                    'a$_\mathbf{T}$/2c [1/s]', fontweight='bold', fontsize=11)
     plt.xlim(0, xlim2)
