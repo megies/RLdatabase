@@ -102,11 +102,25 @@ for event in cat:
 
         attachment_url = r.json()['indices'][0]['attachments_url']
 
+        # delete all existing attachments, if there are any, before uploading
+        # new attachments
+        attachment_url_next = attachment_url
+        r = requests.get(attachment_url_next, **requests_kwargs)
+        assert r.ok
+        while r.json()['count']:
+            for result in r.json()['results']:
+                print(result['url'])
+                r_ = requests.delete(result['url'], **requests_kwargs)
+                assert r_.ok
+            r = requests.get(attachment_url, **requests_kwargs)
+            assert r.ok
+
         # post image attachments            
         for filename in attachments:
             if filename.endswith('.xml'):
                 continue
-            elif filename.endswith('.png'):
+            print(filename)
+            if filename.endswith('.png'):
                 match = re.match(png_re_pattern, filename)
                 if not match:
                     continue
