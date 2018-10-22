@@ -168,7 +168,7 @@ for event in cat:
         # if assertion fails for any reason, delete current folder
         print(r.content.decode('UTF-8'))
         r_del = requests.delete(
-                url=root_path + 'documents/quakeml/{}'.format(xml),
+                url=root_path + 'documents/quakeml/{}'.format(xml_file),
                 **requests_kwargs)
 
         # tag errors for errolog
