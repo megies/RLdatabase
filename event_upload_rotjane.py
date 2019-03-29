@@ -128,8 +128,15 @@ for event in cat:
                 page_number = int(match.group(2))
                 category = '{} ({})'.format(
                     png_page_category_map[page_number], station)
+                if station == 'RLAS' or station == 'ROMY':
+                    station = 'dataless.seed.BW_{}.xml'.format(station)
+                else:
+                    error_list.append(event)
+                    error_type.append('Unidentified Station: {}'.format(station))
+                    continue
                 header = {'content-type': 'image/png',
-                          'category': category}
+                          'category': category,
+                          'station': station}
             elif filename.endswith('.json'):
                 header = headers_json
             else:
