@@ -1453,7 +1453,7 @@ def plot_waveform_comp(event, station, mode, folder_name, tag_name):
     if is_local(ds_in_km) == 'FAR': 
         shift_text = 200000
         event_size = 200
-        if ds_in_km <= 13000:
+        if ds_in_km <= 10000:
             plt.figure(figsize=(18, 9))
             plt.subplot2grid((4, 9), (0, 4), colspan=5, rowspan=4)
 
@@ -1464,7 +1464,7 @@ def plot_waveform_comp(event, station, mode, folder_name, tag_name):
                             resolution='l')
             map.drawmeridians(np.arange(0, 360, 30))
             map.drawparallels(np.arange(-90, 90, 30))
-        elif ds_in_km > 13000:
+        elif ds_in_km > 10000:
             plt.figure(figsize=(18, 9))
             plt.subplot2grid((4, 9), (0, 4), colspan=5, rowspan=4)
             map = Basemap(projection='moll', lon_0=mean_longitude,
