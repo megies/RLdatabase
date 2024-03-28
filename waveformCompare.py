@@ -2143,8 +2143,8 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Comparison of transvere\
         acceleration and vertical rotation rate through direct waveform\
         comparison in different time windows, and cross-correlation analysis.')
-    parser.add_argument('--station', help='Choice of station: RLAS, ROMY\
-        (default is RLAS)', type=str, default='RLAS')
+    parser.add_argument('--station', help='Choice of station', type=str,
+                        default='RLAS', choices=('RLAS', 'ROMY'))
     parser.add_argument('--mode', help='Choose catalog to download events: \
         GCMT catalog for the most up to date catalog. ISC QuakeML file for \
         catalog of local/regional events. IRIS for most stable solutions, \
