@@ -273,6 +273,38 @@ def event_info_data(event, station, polarity, instrument):
             tr,srcTR = download_data(startev, translation_id)
             data_sources[channels] = srcTR
             ac += tr
+
+    elif station == 'BSPF':
+        station_lat = 33.610643
+        station_lon = -116.45543
+
+        # ringlaser signal, source SAGE (aka IRIS)
+        rotation_id = 'PY.BSPF..HJ3'
+        rt,srcRT = download_data(startev, rotation_id, source='IRIS')
+        if polarity.lower() == 'reverse':
+            rt[0].data *= -1
+        # XXX hacky.. code later on looks for 'Z' component code in rotation
+        # data. could download all three and do a proper rotation to be safe,
+        # but HJ3 is the Z component here..
+        for _tr in rt:
+            _tr.stats.channel = 'HJZ'
+
+        # create dictionary for sources
+        # XXX this is a bit awkward, later on in the resulting json it is
+        # stated where the data was fetched from and 'BJZ' is used to look up
+        # the rotational data source, so just use that magic key here too even
+        # though the channel is named otherwise
+        data_sources = {'BJZ':srcRT}
+
+        # broadband station signal, assume all translation has source
+        ac = Stream()
+        for channels in ['HHN','HHE','HHZ']:
+            translation_id = 'PY.PFOIX..{}'.format(channels)
+            tr,srcTR = download_data(startev, translation_id, source='IRIS')
+            # XXX same here.. channels BH? are used as magic keys later on, see
+            # above
+            data_sources['B' + channels[1:]] = srcTR
+            ac += tr
         
     # set attributes necessary for all stations
     event_lat = origin.latitude
@@ -481,6 +513,18 @@ def remove_instr_resp(rt, ac, rt_pcoda, ac_pcoda, station, startev):
         ac.remove_response(output='ACC', pre_filt=(0.005, 0.006, 30., 35.))
         ac_pcoda.remove_response(output='VEL',
                                  pre_filt=(0.005, 0.006, 30., 35.))
+
+        # to nm/s^2
+        for traza in (ac + ac_pcoda):
+            traza.data = 1e9 * traza.data
+
+
+    elif station == 'BSPF':
+        # according to metadata it seems like rotation rate is already in nrad/s
+        # rt[0].data = rt[0].data * 1. / 2.5284 * 1e-3  # rotation rate in nrad/s
+        # rt_pcoda[0].data = rt_pcoda[0].data * 1. / 2.5284 * 1e-3  # nrad/s
+        ac.simulate(paz_remove=paz_sts2, remove_sensitivity=True)  # nm/s^2
+        ac_pcoda.simulate(paz_remove=paz_sts2, remove_sensitivity=True)
 
         # to nm/s^2
         for traza in (ac + ac_pcoda):
@@ -2144,7 +2188,7 @@ if __name__ == '__main__':
         acceleration and vertical rotation rate through direct waveform\
         comparison in different time windows, and cross-correlation analysis.')
     parser.add_argument('--station', help='Choice of station', type=str,
-                        default='RLAS', choices=('RLAS', 'ROMY'))
+                        default='RLAS', choices=('RLAS', 'ROMY', 'BSPF'))
     parser.add_argument('--mode', help='Choose catalog to download events: \
         GCMT catalog for the most up to date catalog. ISC QuakeML file for \
         catalog of local/regional events. IRIS for most stable solutions, \
