@@ -74,6 +74,7 @@ from xml.dom.minidom import parseString
 
 import numpy as np
 import matplotlib as mpl
+from scipy.stats import circmean
 from pprint import pprint
 mpl.use('Agg')
 from obspy.core import read
@@ -1448,6 +1449,7 @@ def plot_waveform_comp(event, station, mode, folder_name, tag_name):
     print("\nPage 1 > Title Card...", end=" ")
 
     # ================================ Draw Maps===============================
+    mean_longitude = circmean((station_lat, event_lat), low=-180, high=180)
     if is_local(ds_in_km) == 'FAR': 
         shift_text = 200000
         event_size = 200
@@ -1458,23 +1460,15 @@ def plot_waveform_comp(event, station, mode, folder_name, tag_name):
             # globe plot
             map = Basemap(projection='ortho', 
                             lat_0=(station_lat + event_lat) / 2, 
-                            lon_0=(station_lon + event_lon) / 2, 
+                            lon_0=mean_longitude,
                             resolution='l')
             map.drawmeridians(np.arange(0, 360, 30))
             map.drawparallels(np.arange(-90, 90, 30))
         elif ds_in_km > 13000:
             plt.figure(figsize=(18, 9))
             plt.subplot2grid((4, 9), (0, 4), colspan=5, rowspan=4)
-
-            # If the great circle between the station and event is crossing the
-            # 180° meridian in the pacific and the stations are far apart the 
-            # map has to be re-centered, otherwise wrong side of globe.
-            if abs(station_lon - event_lon) > 180:
-                lon0 = 180 + (station_lon + event_lon) / 2
-            else:
-                lon0 = (station_lon + event_lon) / 2
-
-            map = Basemap(projection='moll', lon_0=lon0, resolution='l')
+            map = Basemap(projection='moll', lon_0=mean_longitude,
+                          resolution='l')
             map.drawparallels(np.arange(-90, 90, 30))
             map.drawmeridians(np.arange(0, 360, 30))
 
@@ -1487,7 +1481,7 @@ def plot_waveform_comp(event, station, mode, folder_name, tag_name):
         # conic map plot
         map = Basemap(projection='lcc', 
                         lat_0=(station_lat + event_lat) / 2, 
-                        lon_0=(station_lon + event_lon) / 2, 
+                        lon_0=mean_longitude,
                         resolution='i', 
                         width=3000000, 
                         height=2000000)
@@ -1505,7 +1499,7 @@ def plot_waveform_comp(event, station, mode, folder_name, tag_name):
         # conic map plot
         map = Basemap(projection='lcc', 
                         lat_0=(station_lat + event_lat) / 2, 
-                        lon_0=(station_lon + event_lon) / 2, 
+                        lon_0=mean_longitude,
                         resolution='i', 
                         width=600000, 
                         height=400000)
