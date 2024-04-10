@@ -1497,6 +1497,7 @@ def plot_waveform_comp(event, station, mode, folder_name, tag_name):
         map.drawstates(linewidth=0.25)
 
     elif is_local(ds_in_km) == 'CLOSE':
+        shift_text = 0
         event_size = 300
         plt.figure(figsize=(26, 13))
         plt.title('{}T{}Z\n \n '.format(startev.date, startev.time), 
