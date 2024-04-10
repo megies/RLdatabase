@@ -2198,7 +2198,8 @@ if __name__ == '__main__':
         GCMT catalog for the most up to date catalog. ISC QuakeML file for \
         catalog of local/regional events. IRIS for most stable solutions, \
         though recent events might not be present \
-        (default: gcmt, else: iscquakeml, iris)', type=str,default='GCMT')
+        (default: gcmt, else: iscquakeml, iris, isc, usgs)',
+        type=str,default='GCMT')
     parser.add_argument('--polarity', help='Flip polarity of rotation data to \
         fix data errors, to be used in specific time windows of catalog rerun \
         (default: normal, otherwise: reverse)',type=str, default='normal')
@@ -2302,8 +2303,44 @@ if __name__ == '__main__':
         event_source = 'ISC'
         catalog = 'ISC'
 
+    elif mode == 'ISC':
+        print("\nDownloading events from ISC FDSN service")
+        client_isc = fdsnClient('ISC')
+        cat = client_isc.get_events(
+            starttime=UTCDateTime(args.min_datetime),
+            endtime=UTCDateTime(args.max_datetime),
+            minmagnitude=args.min_magnitude,
+            maxmagnitude=args.max_magnitude,
+            minlongitude=args.min_longitude,
+            maxlongitude=args.max_longitude,
+            minlatitude=args.min_latitude,
+            maxlatitude=args.max_latitude,
+            mindepth=args.min_depth,
+            maxdepth=args.max_depth,
+            )
+        event_source = 'ISC'
+        catalog = 'ISC'
+
+    elif mode == 'USGS':
+        print("\nDownloading events from USGS FDSN service")
+        client_usgs = fdsnClient('USGS')
+        cat = client_usgs.get_events(
+            starttime=UTCDateTime(args.min_datetime),
+            endtime=UTCDateTime(args.max_datetime),
+            minmagnitude=args.min_magnitude,
+            maxmagnitude=args.max_magnitude,
+            minlongitude=args.min_longitude,
+            maxlongitude=args.max_longitude,
+            minlatitude=args.min_latitude,
+            maxlatitude=args.max_latitude,
+            mindepth=args.min_depth,
+            maxdepth=args.max_depth,
+            )
+        event_source = 'USGS'
+        catalog = 'USGS'
+
     else:
-        sys.exit('Invalid mode: {}\nValid: GCMT,IRIS,ISCQUAKEML'.format(mode))
+        sys.exit('Invalid mode: {}\nValid: GCMT,IRIS,ISCQUAKEML,ISC,USGS'.format(mode))
 
     # set file output path
     output_path = './OUTPUT/'
