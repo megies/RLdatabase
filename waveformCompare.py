@@ -921,7 +921,7 @@ def baz_analysis(rt, ac, sec):
     # create a list of backazimuths to iterate over
     step = 10
     corr_length = len(rt[0].data) // rt_TW
-    backas = np.linspace(0, 360 - step, 360 / step)
+    backas = np.linspace(0, 360 - step, int(360 / step))
     
     # iterate over BAz, rotate, correlate trace
     corrbaz_list = []
