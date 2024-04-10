@@ -93,6 +93,13 @@ from obspy.clients.filesystem.sds import Client as SDSClient
 from obspy.signal.cross_correlation import correlate
 from obspy.geodetics.base import gps2dist_azimuth, locations2degrees
 
+# seems some LOCAL events make problems when plotting greatcircles etc
+# try to only catch that specific exception (if pyproj is installed and used)
+try:
+    from pyproj.exceptions import GeodError
+except ImportError:
+    GeodError = Exception
+
 # warnings.filterwarnings(
 #     action='once', category=np.VisibleDeprecationWarning,
 #     message='using a non-integer number instead of an integer will result in '
@@ -1517,9 +1524,12 @@ def plot_waveform_comp(event, station, mode, folder_name, tag_name):
     if is_local(ds_in_km) == 'LOCAL' or is_local(ds_in_km) == 'CLOSE':
         map.drawlsmask(land_color='coral', ocean_color='lightblue', lakes=True)
         map.drawcountries(linewidth=0.6)
-   
-    map.drawgreatcircle(event_lon, event_lat, station_lon, station_lat, 
-                                                    linewidth=3, color='yellow')
+    
+    try:
+        map.drawgreatcircle(event_lon, event_lat, station_lon, station_lat, 
+                            linewidth=3, color='yellow')
+    except GeodError:
+        pass
     
     # =========================== Station/ Event ===============================
     ev_x, ev_y = map(event_lon, event_lat)
