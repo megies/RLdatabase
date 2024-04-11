@@ -100,6 +100,15 @@ try:
 except ImportError:
     GeodError = Exception
 
+
+# if not specified here, the "title page" attachment will just state the
+# command line "mode" option as source (e.g. "ISC" or "USGS")
+MODE_INFO = {
+    'GCMT': 'Global Centroid-Moment-Tensor Catalog (GCMT)',
+    'ISCQUAKEML': 'ISC',
+    'IRIS': 'GCMT (via IRIS/SAGE event web service)',
+    }
+
 # warnings.filterwarnings(
 #     action='once', category=np.VisibleDeprecationWarning,
 #     message='using a non-integer number instead of an integer will result in '
@@ -1582,9 +1591,8 @@ def plot_waveform_comp(event, station, mode, folder_name, tag_name):
     ax.axis('off')
 
     plt.subplot2grid((4, 9), (3, 0), colspan=2)
-    plt.title(u'Event Information: \n Global Centroid-Moment-Tensor '
-              'Catalog (GCMT) \n\n Processing Date:\n' + 
-              str(UTCDateTime().date),
+    plt.title(f'Event Information:\n{MODE_INFO.get(mode, mode)}\n\n'
+              f'Processing Date:\n{str(UTCDateTime().date)}',
               fontsize=14)
 
     ax = plt.gca()
