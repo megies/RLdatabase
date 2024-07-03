@@ -93,6 +93,8 @@ from obspy.clients.filesystem.sds import Client as SDSClient
 from obspy.signal.cross_correlation import correlate
 from obspy.geodetics.base import gps2dist_azimuth, locations2degrees
 
+mpl.style.use('classic')
+
 # seems some LOCAL events make problems when plotting greatcircles etc
 # try to only catch that specific exception (if pyproj is installed and used)
 try:
