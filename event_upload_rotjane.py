@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 """04.10.17
 For interacting with Rotational Jane database:
 to upload events from event folders as quakeml files 
@@ -11,11 +11,14 @@ import glob
 import argparse
 import requests
 import datetime
+from pathlib import Path
 
 # settings 
 root_path = 'http://127.0.0.1:8000/rest/'
 authority = ('chow','chow')
-OUTPUT_PATH = os.path.abspath('./OUTPUT/')
+CURDIR = Path().absolute()
+OUTPUT_PATH = CURDIR / 'OUTPUT'
+ERRORLOGDIR = CURDIR / 'errorlogs'
 # our apache is serving this via https now, so we have to use the Geophysik
 # root certificate
 # the certificate was switched to an official DFN certificate (that should be
@@ -51,22 +54,23 @@ if timespan == 'week':
     cat = []
     for J in range(7):
         past = datetime.date.today() - datetime.timedelta(days=J)
-        day = glob.glob(os.path.join(
-            OUTPUT_PATH, past.strftime('%Y'), past.strftime('%m'),
-            '*_{}*'.format(past.isoformat())))
-        cat += day
+        day = (OUTPUT_PATH / past.strftime('%Y') / past.strftime('%m')).glob(
+            f'*_{past.isoformat()}_*')
+        cat += list(day)
 elif timespan == 'all':
     # initial population, grab all events in folder
-    cat = glob.glob(os.path.join(OUTPUT_PATH, '*', '*', '*'))
-    cat.sort(reverse=True)
+    cat = OUTPUT_PATH.glob('*/*/*_*_*')
 else:
     raise ValueError("bad 'timespan' option: '%s'" % timespan)
     
+#cat = OUTPUT_PATH.glob('2024/06/*_*_*')
+
 # ============================================================================
 
 error_list,error_type = [],[]
 for event in cat:
-    print(os.path.basename(event))
+    os.chdir(CURDIR)
+    print(event.name)
     try:
         os.chdir(event)
         attachments = sorted(glob.glob('*'))
@@ -76,7 +80,6 @@ for event in cat:
         if len(xml_files) != 1:
             error_list.append(event)
             error_type.append('No xml file for event')
-            os.chdir('..')
             continue
         xml_file = xml_files[0]
 
@@ -85,7 +88,6 @@ for event in cat:
             error_list.append(event)
             error_type.append('Attachment Number Too Low: {}'.format(
                                                             len(attachments)))
-            os.chdir('..')
             continue
 
         # push quakeml file
@@ -109,7 +111,7 @@ for event in cat:
         assert r.ok
         while r.json()['count']:
             for result in r.json()['results']:
-                print(result['url'])
+                print(f" deleting: {result['url']}")
                 r_ = requests.delete(result['url'], **requests_kwargs)
                 assert r_.ok
             r = requests.get(attachment_url, **requests_kwargs)
@@ -161,28 +163,21 @@ for event in cat:
         # XXX     try:
         # XXX         att_count = r2.json()['indices'][0]['attachments_count']
         # XXX         if att_count == 5:
-        # XXX             os.chdir('..')
         # XXX             continue
         # XXX         elif att_count != 5:
         # XXX             error_list.append(event)
         # XXX             error_type.append('Already Uploaded; Attachment Count Error')
-        # XXX             os.chdir('..')
         # XXX             continue
         # XXX     except IndexError:
         # XXX         error_list.append(event)
         # XXX         error_type.append('Already Uploaded; Attachment Count Error')
-        # XXX         os.chdir('..')
         # XXX         continue
         # XXX
         # XXX assert r.ok
 
-
-        os.chdir('..')
-
     except ConnectionError:
         error_list.append(event)
         error_type.append('Connection Error')
-        os.chdir('..')
         continue
 
     except AssertionError:
@@ -199,32 +194,22 @@ for event in cat:
         except Exception:
             reason = ''
         error_type.append(str(r.status_code) + ' ' + reason)
-        os.chdir('..')
         continue
 
 # write error log to txt file to see what failed
 if len(error_list) > 0:
-    if not os.path.exists('../errorlogs'):
-            os.makedirs('../errorlogs')
-    os.chdir('../errorlogs')
+    if not ERRORLOGDIR.exists():
+        ERRORLOGDIR.mkdir()
     timestamp = datetime.datetime.now()
     M = timestamp.month
     Y = timestamp.year
-    mode = 'w'
     log_name = 'upload_{}_{}.txt'.format(M,Y)
 
-    # check if file exists
-    if os.path.exists(log_name):
-        mode = 'a+'
-
-    with open(log_name,mode) as f:
+    with open(ERRORLOGDIR / log_name, 'at') as f:
         f.write('Error Log Created {}\n'.format(timestamp))
         f.write('{}\n'.format('='*79)) 
         for i in range(len(error_list)):
            f.write('{}\n> {}\n'.format(error_list[i],error_type[i]))
         f.write('{}\n'.format('='*79)) 
 
-
     print('Logged {} error(s)'.format(len(error_list)))
-
-
