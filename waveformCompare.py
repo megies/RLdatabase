@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
 """
@@ -69,6 +69,7 @@ import argparse
 import datetime
 import warnings
 from collections import OrderedDict
+from pathlib import Path
 from urllib.request import urlopen
 from xml.dom.minidom import parseString
 
@@ -2140,6 +2141,29 @@ def plot_waveform_comp(event, station, mode, folder_name, tag_name):
     print("Done\n")
 
 
+def cleanup_incomplete_plot_waveform_comp(station, folder_name, tag_name):
+    """
+    Cleanup files for an event that was potentially processed only partially,
+    i.e. exception occuring during plotting. Also remove event folder if no
+    files left in it, i.e. no other stations have valid processing results as
+    well.
+    """
+    print("Removing incomplete processing results...")
+    directory = Path(folder_name).absolute()
+    for path in directory.glob(f'{tag_name}_{station}_page_*.png'):
+        path.unlink()
+        print(f'Deleted: {path.name}')
+    # remove directory if it is empty now, rmdir raises if not empty
+    try:
+        directory.rmdir()
+        print(f'Removed directory: {directory.name}')
+    except OSError as e:
+        if 'Directory not empty' in str(e):
+            pass
+        else:
+            raise e
+
+
 def generate_tags(event):
 
     """
@@ -2399,21 +2423,18 @@ if __name__ == '__main__':
                             success_counter += 1
 
                         # if any error, remove folder, continue
-                        # XXX this needs to be done differently, because an
-                        # XXX error while processing one station might delete
-                        # XXX successful processing results of the other station
                         except Exception as e:
                             print(e)
-                            print("Removing incomplete folder...\n")
                             error_list.append(tag_name)
                             error_type.append(e)
-                            shutil.rmtree(folder_name)
+                            cleanup_incomplete_plot_waveform_comp(
+                                station, folder_name, tag_name)
                             fail_counter += 1
 
                         # if keyboard interrupt, remove folder, quit
                         except KeyboardInterrupt:
-                            print("Removing incomplete folder...\n")
-                            shutil.rmtree(folder_name)
+                            cleanup_incomplete_plot_waveform_comp(
+                                station, folder_name, tag_name)
                             sys.exit()
 
                 # if json not found, folder is incomplete, continue
@@ -2438,17 +2459,18 @@ if __name__ == '__main__':
                 # if any error, remove folder, continue
                 except Exception as e:
                     print(e)
-                    print("Removing incomplete folder...\n")
                     error_list.append(tag_name)
                     error_type.append(e)
+                    cleanup_incomplete_plot_waveform_comp(
+                        station, folder_name, tag_name)
                     shutil.rmtree(folder_name)
                     fail_counter += 1
 
                 # if keyboard interrupt, remove folder, quit
                 except KeyboardInterrupt:
                     fail_counter += 1
-                    print("Removing incomplete folder...\n")
-                    shutil.rmtree(folder_name)
+                    cleanup_incomplete_plot_waveform_comp(
+                        station, folder_name, tag_name)
                     sys.exit()
 
         # if error creating tags, continue
