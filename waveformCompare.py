@@ -1344,14 +1344,14 @@ def store_info_json(rt, ac, trv_acc, data_sources, station, event, dist_baz,
     filename_json = os.path.join(folder_name,tag_name + '.json')
 
     if os.path.exists(filename_json): 
-        dic_event = json.load(open(filename_json),object_pairs_hook=OrderedDict)
+        with open(filename_json, 'rt') as fh:
+            dic_event = json.load(fh, object_pairs_hook=OrderedDict)
 
     # combine two dictionaries, save
     dic_event.update(dic_station)
 
-    outfile = open(filename_json, 'wt')
-    json.dump(dic_event, outfile, indent = 4)
-    outfile.close()
+    with open(filename_json, 'wt') as fh:
+        json.dump(dic_event, fh, indent=4)
 
 
 def store_info_xml(event,folder_name,tag_name,station):
@@ -1386,7 +1386,8 @@ def store_info_xml(event,folder_name,tag_name,station):
         event.extra = AttribDict()
 
     # grab data from json file
-    data = json.load(open(filename_json))
+    with open(filename_json, 'rt') as fh:
+        data = json.load(fh)
     rotational_parameters = ['epicentral_distance',
                              'theoretical_backazimuth',
                              'peak_correlation_coefficient']
@@ -2386,7 +2387,8 @@ if __name__ == '__main__':
                 # if new station, run waveform compare again
                 try:
                     filename_json = os.path.join(folder_name,tag_name + '.json')
-                    data = json.load(open(filename_json))
+                    with open(filename_json, 'rt') as fh:
+                        data = json.load(fh)
                     if data.get('station_information_{}'.format(station)):
                         print("This event was already processed\n")
                         already_processed += 1
