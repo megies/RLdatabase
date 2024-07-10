@@ -2190,7 +2190,7 @@ def generate_tags(event):
     mag_tag = '{:0^4}'.format(str(event.magnitudes[0]['mag']))
 
     # Flinn Engdahl region, i.e. SOUTHEAST_OF_HONSHU_JAPAN
-    substitutions = [(', ', '_'),(' ','_')]
+    substitutions = [(', ', '_'), (' ', '_'), ("'", '_')]
     for search, replace in substitutions:
         flinn_engdahl = flinn_engdahl.replace(search,replace)
 
