@@ -143,8 +143,10 @@ for event in cat:
                 page_number = int(match.group(2))
                 category = '{} ({})'.format(
                     png_page_category_map[page_number], station)
-                if station == 'RLAS' or station == 'ROMY':
+                if station in ['RLAS', 'ROMY']:
                     station = 'dataless.seed.BW_{}.xml'.format(station)
+                elif station == 'BSPF':
+                    station = '{}.xml'.format(station)
                 else:
                     error_list.append(event)
                     error_type.append('Unidentified Station: {}'.format(station))
