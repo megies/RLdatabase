@@ -34,10 +34,15 @@ requests_kwargs = {
 parser = argparse.ArgumentParser(description='Upload event quakeml and \
     post attachments to rotational Jane database.')
 parser.add_argument('--timespan', help='What time span to upload files for, \
-    options are the past [week] (default), or [all] events available.', 
-                                                type=str, default='week')
+    options are the past [week] (default), [all] events available or instead \
+    the path(s) to folder(s) for individual event(s) which overrides this \
+    option.', type=str, default='week')
+parser.add_argument(
+    'directories', type=str, action="store", nargs="*", help='Individual \
+    event folder(s) to upload. If specified, "timespan" mechanism is ignored.')
 args = parser.parse_args()
 timespan = args.timespan
+directories = args.directories
 
 # for attachments
 png_re_pattern = re.compile(r'.*_([a-zA-Z]+)_page_([0-9]).png$')
@@ -49,19 +54,27 @@ png_page_category_map = {
 headers_json = {'content-type': 'text/json',
                 'category': 'Processing Results'}
 
-if timespan == 'week':
-    # look for events in the past week
-    cat = []
-    for J in range(7):
-        past = datetime.date.today() - datetime.timedelta(days=J)
-        day = (OUTPUT_PATH / past.strftime('%Y') / past.strftime('%m')).glob(
-            f'*_{past.isoformat()}_*')
-        cat += list(day)
-elif timespan == 'all':
-    # initial population, grab all events in folder
-    cat = OUTPUT_PATH.glob('*/*/*_*_*')
+if directories:
+    cat = list(Path(d).absolute() for d in directories)
+    for path in cat:
+        if not path.exists() or not path.is_dir():
+            msg = (f'Location given on command line is not a directory: '
+                   f'{str(path)}')
+            raise ValueError(msg)
 else:
-    raise ValueError("bad 'timespan' option: '%s'" % timespan)
+    if timespan == 'week':
+        # look for events in the past week
+        cat = []
+        for J in range(7):
+            past = datetime.date.today() - datetime.timedelta(days=J)
+            day = (OUTPUT_PATH / past.strftime('%Y') / past.strftime('%m')).glob(
+                f'*_{past.isoformat()}_*')
+            cat += list(day)
+    elif timespan == 'all':
+        # initial population, grab all events in folder
+        cat = OUTPUT_PATH.glob('*/*/*_*_*')
+    else:
+        raise ValueError("bad 'timespan' option: '%s'" % timespan)
     
 #cat = OUTPUT_PATH.glob('2024/06/*_*_*')
 
