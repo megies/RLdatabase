@@ -14,7 +14,7 @@ import datetime
 from pathlib import Path
 
 # settings 
-root_path = 'http://127.0.0.1:8000/rest/'
+root_path = 'https://marum.geophysik.uni-muenchen.de:8080/rest/'  # can later be changed to marum:8080
 authority = ('chow','chow')
 CURDIR = Path().absolute()
 OUTPUT_PATH = CURDIR / 'OUTPUT'
