@@ -68,7 +68,7 @@ else:
         for J in range(7):
             past = datetime.date.today() - datetime.timedelta(days=J)
             day = (OUTPUT_PATH / past.strftime('%Y') / past.strftime('%m')).glob(
-                f'*_{past.isoformat()}_*')
+                f'*_{past.isoformat()}T*')
             cat += list(day)
     elif timespan == 'all':
         # initial population, grab all events in folder
