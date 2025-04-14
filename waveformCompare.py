@@ -1035,6 +1035,10 @@ def estimate_baz(rt, ac, start, end):
 
 
     step = 1
+    # need to be careful here, this seems fragile, later on some code relies on
+    # the BAZ value matching the index in the array, i.e. basically the array
+    # being an np.arange() with step=1. If this gets changed here, code below
+    # will break (look for "corr_list[int(best_ebaz)]")
     baz_list = np.linspace(0, int(360 - step), int(360 / step)) # BAz array
     
     # iterate over all BAz values, correlate in time windows
@@ -1067,11 +1071,14 @@ def estimate_baz(rt, ac, start, end):
         corrsum_list.append(bazsum)
 
     # determine estimated backazimuth
-    if all(corrsum_list) == 0.0:
+    if all(np.isnan(corrsum_list)):
         best_ebaz = np.nan
         max_ebaz_xcoef = np.nan
     else:
-        best_ebaz = baz_list[np.asarray(corrsum_list).argmax()]
+        best_ebaz = baz_list[np.nanargmax(corrsum_list)]
+        # this seems quite fragile and seemingly only works because the BAZ
+        # list is just an enumeration so the stored values equal the indices in
+        # the array
         max_ebaz_xcoef = np.max(corr_list[int(best_ebaz)])
 
     if max(corrsum_list) == 0.0:
