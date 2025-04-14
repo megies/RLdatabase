@@ -338,8 +338,9 @@ def event_info_data(event, station, polarity, instrument):
         ca.stats.coordinates['longitude'] = station_lon
         ca.stats.coordinates['latitude'] = station_lat
         ca.stats['back_azimuth'] = dist_baz[2]
-        ca.stats['starttime'] = startev - 180
-        ca.stats['sampling_rate'] = 20.
+        # does not make sense
+        # ca.stats['starttime'] = startev - 180
+        # ca.stats['sampling_rate'] = 20.
     
     return event_lat, event_lon, depth, startev, rt, ac, dist_baz, data_sources
 
@@ -438,14 +439,22 @@ def resample(is_local, rt, ac):
         cutoff = 2.0  
     elif is_local == 'CLOSE':
         for trr in (rt + ac):
-            trr.data = trr.data[0: int(1800 * rt[0].stats.sampling_rate)]
+            # trim event
+            # starttime is to far back in time (+150 seconds)
+            # endtime is appropiate for close events with (+400 seconds)
+            trr.trim(starttime=trr.stats.starttime+150, endtime=trr.stats.starttime + 250)
         rt_pcoda = rt.copy()
         ac_pcoda = ac.copy()
+
+        # decimate (should then be 100 Hz)
         rt.decimate(factor=2)
         ac.decimate(factor=2)
-        sec = 3
-        sec_p = 2
-        cutoff = 4.0  
+        # set time interval for ...
+        sec = 1  # has to be an integer
+        # set p time interval
+        sec_p = 0.5
+        # set cutoff frequency (highpass)
+        cutoff = 25.0
 
     return rt, ac, rt_pcoda, ac_pcoda, sec, sec_p, cutoff, cutoff_pc
 
@@ -789,33 +798,44 @@ def time_windows(dist_in_km, arriv_p, arriv_s, init_sec, is_local):
     """
 
     if is_local == 'FAR':
+        # set time interval for p-waves
         min_pw = int(arriv_p)
         max_pw = int(min_pw + (arriv_s - arriv_p) // 4)
+        # set time interval for s-waves
         min_sw = int(round(arriv_s - 0.001 * (arriv_s - arriv_p)))
         max_sw = int(arriv_s + 150)
+        # set time interval for initial surface waves
         min_lwi = int(round(surf_tts(dist_in_km, init_sec) - 20))
         max_lwi = int(min_lwi + round((dist_in_km/1E3) * 50)) # 50sec/1000 km. 
+        # set time interval for latter surface waves
         min_lwf = int(max_lwi)
         max_lwf = int(min_lwf + round((dist_in_km/1E3) * 60)) # 60sec/1000 km.
     elif is_local == 'LOCAL':
+        # set time interval for p-waves
         min_pw = int(arriv_p)
         max_pw = int(min_pw + 20)
+        # set time interval for s-waves
         min_sw = int(arriv_s - 5)
         max_sw = int(min_sw + 20)
+        # set time interval for initial surface waves
         min_lwi = int(round(surf_tts(dist_in_km, init_sec) + 20))
         max_lwi = int(min_lwi + 50)
+        # set time interval for latter surface waves
         min_lwf = int(max_lwi)
         max_lwf = int(min_lwf + 80)
     elif is_local == 'CLOSE':
+        # set time interval for p-waves
         min_pw = int(arriv_p)
-        max_pw = int(min_pw + 7)
+        max_pw = int(min_pw + 2) # add duration in seconds
+        # set time interval for s-waves
         min_sw = int(arriv_s)
-        max_sw = int(min_sw + 7)
-        min_lwi = int(round(surf_tts(dist_in_km, init_sec) + 5))
-        max_lwi = int(min_lwi + 12)
+        max_sw = int(min_sw + 3) # add duration in seconds
+        # set time interval for initial surface waves
+        min_lwi = int(round(surf_tts(dist_in_km, init_sec) - 5))
+        max_lwi = int(min_lwi + 5) # add duration in seconds
+        # set time interval for latter surface waves
         min_lwf = int(max_lwi)
-        max_lwf = int(min_lwf + 80)
-
+        max_lwf = int(min_lwf + 20) # add duration in seconds
 
     return min_pw, max_pw, min_sw, max_sw, min_lwi, max_lwi, min_lwf, max_lwf
 
@@ -1047,8 +1067,12 @@ def estimate_baz(rt, ac, start, end):
         corrsum_list.append(bazsum)
 
     # determine estimated backazimuth
-    best_ebaz = baz_list[np.asarray(corrsum_list).argmax()] 
-    max_ebaz_xcoef = np.max(corr_list[int(best_ebaz)]) 
+    if all(corrsum_list) == 0.0:
+        best_ebaz = np.nan
+        max_ebaz_xcoef = np.nan
+    else:
+        best_ebaz = baz_list[np.asarray(corrsum_list).argmax()]
+        max_ebaz_xcoef = np.max(corr_list[int(best_ebaz)])
 
     if max(corrsum_list) == 0.0:
         EBA = np.nan
@@ -1333,7 +1357,17 @@ def store_info_json(rt, ac, trv_acc, data_sources, station, event, dist_baz,
                         ('vel_std', phasv_stds[7]),
                         ('vel_unit', 'km/s')
                         ])
-                    )
+                    ),
+                    ('band_9',
+                        OrderedDict([
+                        ('freqmin', 1.0),
+                        ('freqmax', 10.0),
+                        ('freq_unit', 'Hz'),
+                        ('mean_phase_vel', phasv_means[7]),
+                        ('vel_std', phasv_stds[7]),
+                        ('vel_unit', 'km/s')
+                        ])
+                     )
                     ])
                 )
                 ])
@@ -1655,6 +1689,8 @@ def plot_waveform_comp(event, station, mode, folder_name, tag_name):
     # main figure
     plt.figure(figsize=(18, 9))
     plt.subplot2grid((6, 5), (2, 0), colspan=5, rowspan=2)
+
+    # plot rotation rate and transversal acceleration waveforms
     plt.plot(rt[0].times(reftime=reftime), rt[0].data, color='r',
              label=r'Rotation rate (%s)' % rt[0].id)
     plt.plot(trv_acc[0].times(reftime=reftime),
@@ -1674,8 +1710,10 @@ def plot_waveform_comp(event, station, mode, folder_name, tag_name):
     # gap between annotation and vertical
     if is_local(ds_in_km) == 'FAR':  
         xgap = 50
-    else:
+    elif is_local(ds_in_km) == 'LOCAL':
         xgap = 15
+    elif is_local(ds_in_km) == 'CLOSE':
+        xgap = 1
 
     bbox_props = dict(boxstyle="square, pad=0.3", fc='white')
     plt.axvline(x=min_pw, linewidth=1)
@@ -1876,7 +1914,7 @@ def plot_waveform_comp(event, station, mode, folder_name, tag_name):
     # ========================================================================= 
     print("\nPage 3 > Cross-correlation, Phase velocity...",end=" ")
 
-    X, Y = np.meshgrid(np.arange(0, sec * len(corrcoefs), sec), backas)
+    X, Y = np.meshgrid(np.arange(0+sec/2, sec * len(corrcoefs) + sec/2, sec), backas)
 
     # subplot 1
     plt.figure(figsize=(18, 9))
@@ -1925,8 +1963,10 @@ def plot_waveform_comp(event, station, mode, folder_name, tag_name):
     # 75% annotation location
     if is_local(ds_in_km) == 'FAR':
         shift75 = 50
-    else:
+    elif is_local(ds_in_km) == 'LOCAL':
         shift75 = 10
+    elif is_local(ds_in_km) == 'CLOSE':
+        shift75 = 1
 
     # XXX super ugly placement of axis annotation.. should be done with axis
     # coordinates in x direction (matplotlib blended transform)
@@ -1969,11 +2009,16 @@ def plot_waveform_comp(event, station, mode, folder_name, tag_name):
     cb1.set_ticks(np.linspace(-1,1,9).tolist())
 
     # ============================= Save Figure =============================
-    
-    plt.savefig(
-        os.path.join(folder_name,tag_name + '_{}_page_3.png'.format(station)))
+
+    figure_name = tag_name + '_{}_page_3.png'.format(station)
+
+    plt.savefig(os.path.join(folder_name,figure_name))
     plt.close()
-    print("Done")
+
+    if os.path.exists(os.path.join(folder_name,figure_name)):
+        print("Done")
+    else:
+        print("Failed to save figure")
 
     # ======================================================================== 
     #                                
