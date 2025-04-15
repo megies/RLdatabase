@@ -2255,7 +2255,7 @@ def plot_waveform_comp(event, station, mode, folder_name, tag_name):
 
     store_info_xml(event,folder_name,tag_name,station)
 
-    if os.path.exists(os.path.join(folder_name,tag_name + '_{}_info.json'.format(station))):
+    if os.path.exists(os.path.join(folder_name,tag_name + '.json'.format(station))):
         print("Done\n")
     else:
         print("Failed to save json file")
