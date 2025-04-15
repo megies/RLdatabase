@@ -1665,32 +1665,21 @@ def plot_waveform_comp(event, station, mode, folder_name, tag_name):
                                                 edgecolor="k", zorder=100)
 
     # title large
-    plt.subplot2grid((4, 9), (1, 0), colspan=2)
-    plt.title(u'{}T{}Z\n'.format(startev.date, startev.time), 
-                                        fontsize=20, weight='bold', ha='left')
     ax = plt.gca()
-    ax.axis('equal')
-    ax.axis('off')
+    ax.text(-0.9, 0.95, u'{}T{}Z'.format(startev.date, startev.time), 
+            fontsize=20, weight='bold', ha='left', va='center', transform=ax.transAxes)
 
     # sub-title
-    plt.subplot2grid((4, 9), (2, 0), colspan=2)
-    plt.title(u'\n\nRegion: {}'.format(flinn_engdahl_title) + 
+    ax.text(-0.9, 0.55, u'\n\nRegion: {}'.format(flinn_engdahl_title) + 
             '\n\nMagnitude: {:.1f} {}'.format(mag.mag,mag.magnitude_type) + 
             '\n\nDistance: {:.1f} [km]'.format(ds_in_km) + 
             '\n\nDepth: {:.1f} [km]'.format(depth) +
             '\n\nBackazimuth: {:.1f} [°]'.format(BAz),
-              fontsize=18, fontweight='bold', ha='left')
+              fontsize=18, fontweight='bold', ha='left', va='center', transform=ax.transAxes)
 
-    ax = plt.gca()
-    ax.axis('off')
-
-    plt.subplot2grid((4, 9), (3, 0), colspan=2)
-    plt.title(f'Event Information:\n{MODE_INFO.get(mode, mode)}\n\n'
+    ax.text(-0.9, 0.10, f'Event Information:\n{MODE_INFO.get(mode, mode)}\n\n'
               f'Processing Date:\n{str(UTCDateTime().date)}',
-              fontsize=14, ha='left')
-
-    ax = plt.gca()
-    ax.axis('off')
+              fontsize=14, ha='left', va='center', transform=ax.transAxes)
 
     # ============================= Save Figure ============================
     figure_name = tag_name + '_{}_page_1.png'.format(station)
