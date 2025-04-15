@@ -1511,7 +1511,10 @@ def plot_waveform_comp(event, station, mode, folder_name, tag_name):
     print("\nPage 1 > Title Card...", end=" ")
 
     # ================================ Draw Maps===============================
-    mean_longitude = circmean((station_lat, event_lat), low=-180, high=180)
+    # calculate mean longitude
+    mean_longitude = circmean((station_lon, event_lon), low=-180, high=180)
+    # calculate mean latitude
+    mean_latitude = circmean((station_lat, event_lat), low=-90, high=90)
     if is_local(ds_in_km) == 'FAR': 
         shift_text = 200000
         event_size = 200
@@ -1542,7 +1545,7 @@ def plot_waveform_comp(event, station, mode, folder_name, tag_name):
 
         # conic map plot
         map = Basemap(projection='lcc', 
-                        lat_0=(station_lat + event_lat) / 2, 
+                        lat_0=mean_latitude,
                         lon_0=mean_longitude,
                         resolution='i', 
                         width=3000000, 
@@ -1554,52 +1557,84 @@ def plot_waveform_comp(event, station, mode, folder_name, tag_name):
     elif is_local(ds_in_km) == 'CLOSE':
         shift_text = 0
         event_size = 300
-        plt.figure(figsize=(26, 13))
-        plt.title('{}T{}Z\n \n '.format(startev.date, startev.time), 
-                                                fontsize=24, fontweight='bold')
+        plt.figure(figsize=(18, 9))
         plt.subplot2grid((4, 9), (0, 4), colspan=5, rowspan=4)
 
         # conic map plot
         map = Basemap(projection='lcc', 
-                        lat_0=(station_lat + event_lat) / 2, 
+                        lat_0=mean_latitude, 
                         lon_0=mean_longitude,
                         resolution='i', 
-                        width=600000, 
-                        height=400000)
-        map.drawparallels(np.arange(0., 90, 2.), labels=[1, 0, 0, 1])
-        map.drawmeridians(np.arange(0., 360., 2.), labels=[1, 0, 0, 1])
-        map.drawrivers(linewidth=0.25, color='b')
-        map.drawstates(linewidth=0.25)
+                        width=300000, 
+                        height=200000)
+        map.drawparallels(np.arange(0., 90, 0.5), labels=[1, 0, 0, 1])
+        map.drawmeridians(np.arange(0., 360., 0.5), labels=[1, 0, 0, 1])
+        map.drawrivers(linewidth=0.5, color='b')
+        map.drawstates(linewidth=0.5)
 
     # basemap boundary settings
-    map.drawcoastlines(linewidth=0.25)
-    map.drawcountries(linewidth=0.25)
-    map.fillcontinents(color='coral', lake_color='lightblue')
+    map.drawcoastlines(linewidth=0.5)
+    map.drawcountries(linewidth=0.5)
+    map.fillcontinents(color='lightgrey', lake_color='lightblue')
     map.drawmapboundary(fill_color='lightblue')
 
     if is_local(ds_in_km) == 'LOCAL' or is_local(ds_in_km) == 'CLOSE':
-        map.drawlsmask(land_color='coral', ocean_color='lightblue', lakes=True)
-        map.drawcountries(linewidth=0.6)
+        map.drawlsmask(land_color='lightgrey', ocean_color='lightblue', lakes=True)
+        map.drawcountries(linewidth=0.6, color='red')
     
     try:
-        map.drawgreatcircle(event_lon, event_lat, station_lon, station_lat, 
-                            linewidth=3, color='yellow')
+        if is_local(ds_in_km) in ('LOCAL', 'CLOSE'):
+            # draw straight line between event and station
+            map.plot(
+                [event_lon, station_lon],
+                [event_lat, station_lat],
+                color='black',
+                linewidth=3,
+                zorder=100
+            )
+        elif is_local(ds_in_km) == 'FAR':
+            map.drawgreatcircle(event_lon, event_lat, station_lon, station_lat, 
+                                linewidth=3, color='yellow')
     except GeodError:
         pass
     
+    # increase tick label size
+    if is_local(ds_in_km) == 'CLOSE':
+        ax = plt.gca()
+        ax.tick_params(labelsize=14)
+
     # =========================== Station/ Event ===============================
     ev_x, ev_y = map(event_lon, event_lat)
     sta_x, sta_y = map(station_lon, station_lat)
 
     # station
-    map.scatter(sta_x, sta_y, 200, color='b', marker='v',
-                                    edgecolor='k', zorder=100)
-    plt.text(sta_x + shift_text, sta_y, station, va='top',
-                                             family='monospace', 
-                                             weight='bold', 
-                                             zorder=101,
-                                             color='k', 
-                                             backgroundcolor='white')
+    if is_local(ds_in_km) == 'CLOSE':
+        map.scatter(sta_x, sta_y, 600,
+                    color='b',
+                    marker='v',
+                    edgecolor='k',
+                    zorder=100
+                    )
+    
+        plt.text(
+            sta_x+shift_text+25, sta_y+200, station,
+            va='top',
+            size=20,
+            family='monospace', 
+            weight='bold', 
+            zorder=101,
+            color='k', 
+            backgroundcolor='white'
+        )
+    else:
+        map.scatter(sta_x, sta_y, 200, color='b', marker='v',
+                                        edgecolor='k', zorder=100)
+        plt.text(sta_x + shift_text, sta_y, station, va='top',
+                                                 family='monospace', 
+                                                 weight='bold', 
+                                                 zorder=101,
+                                                 color='k', 
+                                                 backgroundcolor='white')
     # event as moment tensor or star 
     # !!! doesn't work for some reason - disregard for now
     # if moment_tensor:
@@ -1613,13 +1648,21 @@ def plot_waveform_comp(event, station, mode, folder_name, tag_name):
     #                                         edgecolor="k", zorder=200)
 
     # plot event
-    map.scatter(ev_x, ev_y, event_size, color="b", marker="*", 
-                                            edgecolor="k", zorder=100)
+    if is_local(ds_in_km) == 'CLOSE':
+        map.scatter(ev_x, ev_y, event_size+100,
+            color="b", 
+            marker="*", 
+            edgecolor="k", 
+            zorder=100
+        )
+    else:
+        map.scatter(ev_x, ev_y, event_size, color="b", marker="*", 
+                                                edgecolor="k", zorder=100)
 
     # title large
     plt.subplot2grid((4, 9), (1, 0), colspan=2)
     plt.title(u'{}T{}Z\n'.format(startev.date, startev.time), 
-                                        fontsize=20, weight='bold')
+                                        fontsize=20, weight='bold', ha='left')
     ax = plt.gca()
     ax.axis('equal')
     ax.axis('off')
@@ -1627,11 +1670,11 @@ def plot_waveform_comp(event, station, mode, folder_name, tag_name):
     # sub-title
     plt.subplot2grid((4, 9), (2, 0), colspan=2)
     plt.title(u'\n\nRegion: {}'.format(flinn_engdahl_title) + 
-            '\n\nMagnitude: {} {}'.format(mag.mag,mag.magnitude_type) + 
-            '\n\nDistance: {} [km], {} [°]'.format(
-                                round(ds_in_km,2), round(BAz,2)) + 
-            '\n\nDepth: {} [km]'.format(depth),
-              fontsize=18, fontweight='bold')
+            '\n\nMagnitude: {:.1f} {}'.format(mag.mag,mag.magnitude_type) + 
+            '\n\nDistance: {:.1f} [km]'.format(ds_in_km) + 
+            '\n\nDepth: {:.1f} [km]'.format(depth) +
+            '\n\nBackazimuth: {:.1f} [°]'.format(BAz),
+              fontsize=18, fontweight='bold', ha='left')
 
     ax = plt.gca()
     ax.axis('off')
@@ -1639,16 +1682,23 @@ def plot_waveform_comp(event, station, mode, folder_name, tag_name):
     plt.subplot2grid((4, 9), (3, 0), colspan=2)
     plt.title(f'Event Information:\n{MODE_INFO.get(mode, mode)}\n\n'
               f'Processing Date:\n{str(UTCDateTime().date)}',
-              fontsize=14)
+              fontsize=14, ha='left')
 
     ax = plt.gca()
     ax.axis('off')
 
     # ============================= Save Figure ============================
-    plt.savefig(
-        os.path.join(folder_name,tag_name + '_{}_page_1.png'.format(station)))
+    figure_name = tag_name + '_{}_page_1.png'.format(station)
+    
+    plt.tight_layout()
+    plt.savefig(os.path.join(folder_name,figure_name),
+                )
     plt.close()
     print("Done")
+    if os.path.exists(os.path.join(folder_name,figure_name)):
+        print("Done")
+    else:
+        print("Failed to save figure")
     # ======================================================================== 
     #                                   
     #               Preprocessing of rotations and translations
@@ -2095,7 +2145,11 @@ def plot_waveform_comp(event, station, mode, folder_name, tag_name):
     # ========================================================================= 
     # P-coda limits
     xlim1 = rt[0].stats.delta * len(rt[0].data) 
-    Xp, Yp = np.meshgrid(np.arange(0,sec_p * len(corrcoefs_p), sec_p), backas_p)
+    Xp, Yp = np.meshgrid(np.arange(0+sec_p/2, sec_p * len(corrcoefs_p) + sec_p/2, sec_p), backas_p)
+
+    # find xlimits
+    xlim1 = min_pw - 20
+    xlim2 = max_lwi + 30
 
     print("\nPage 4 > P-Coda Waveform Comparison...",end=" ")
 
@@ -2115,9 +2169,9 @@ def plot_waveform_comp(event, station, mode, folder_name, tag_name):
     plt.axvline(x=min_pw, linewidth=1)
     plt.axvline(x=min_sw, linewidth=1)
     plt.grid(True)
+    plt.xlim(xlim1, xlim2)
 
     # subplot 2
-    xlim2 = (min_lwi + max_lwi) // 2
     plt.subplot2grid((5, 26), (1, 0), colspan=25, rowspan=2)
 
     plt.plot(rt_pcoda[0].times(reftime=reftime_p),
@@ -2127,7 +2181,7 @@ def plot_waveform_comp(event, station, mode, folder_name, tag_name):
              label=r'Transversal acceleration (%s)' % trv_pcoda[0].id)
     plt.ylabel(r'$\dot{\mathbf{\Omega}}_\mathbf{z}$ [nrad/s] -'
                    'a$_\mathbf{T}$/2c [1/s]', fontweight='bold', fontsize=11)
-    plt.xlim(0, xlim2)
+    plt.xlim(xlim1, xlim2)
     plt.ylim(min(rt_pcoda[0].data[0:max_lwi_ac]), 
         fact1_p + max((1. / (2. * c1_p)) * trv_pcoda[0].data[0:max_lwi_ac]))
     
@@ -2135,13 +2189,13 @@ def plot_waveform_comp(event, station, mode, folder_name, tag_name):
                         trv_pcoda[0].data[0:max_lwi_ac]) -
                         np.abs(min(rt_pcoda[0].data[0: max_lwi_ac])))/2.
     plt.axvline(x=min_pw, linewidth=1)
-    plt.annotate('P-arrival', 
+    plt.annotate('P', 
                             xy=(min_pw+xgap*float(xlim2/xlim1),box_yposition2), 
-                            fontsize=14, fontweight='bold', bbox=bbox_props)
+                            fontsize=14, fontweight='bold', bbox=bbox_props, ha='right')
     plt.axvline(x=min_sw, linewidth=1)
-    plt.annotate('S-arrival', 
+    plt.annotate('S', 
                             xy=(min_sw+xgap*float(xlim2/xlim1),box_yposition2), 
-                            fontsize=14,fontweight='bold', bbox=bbox_props)
+                            fontsize=14,fontweight='bold', bbox=bbox_props, ha='right')
     plt.grid(True)
     plt.legend(loc='center right', shadow=True)
 
@@ -2149,7 +2203,7 @@ def plot_waveform_comp(event, station, mode, folder_name, tag_name):
     plt.subplot2grid((5, 26), (3, 0), colspan=25)
     plt.plot(np.arange(0, sec_p * len(corrcoefs_p), sec_p), corrcoefs_p, '.k')
     plt.ylabel(r'X-corr. coeff.', fontweight='bold')
-    plt.xlim(0, xlim2)
+    plt.xlim(xlim1, xlim2)
     plt.ylim(0, 1)
     plt.grid(True)
 
@@ -2158,7 +2212,7 @@ def plot_waveform_comp(event, station, mode, folder_name, tag_name):
     plt.pcolor(Xp, Yp, corrbaz_p, cmap=plt.cm.RdYlGn_r, vmin=-1, vmax=1)
     plt.plot(np.arange(0, sec_p * len(corrcoefs_p), sec_p), 
                                                         maxcorr_p_list, '.k')
-    plt.xlim(0, xlim2)
+    plt.xlim(xlim1, xlim2)
     plt.xlabel(r'Time [s]', fontweight='bold')
     plt.ylabel(r'BAz [°]', fontweight='bold')
     plt.ylim([0, 360])
@@ -2173,10 +2227,15 @@ def plot_waveform_comp(event, station, mode, folder_name, tag_name):
     cb1.set_ticks(np.linspace(-1,1,9).tolist())
    
     # ============================= Save Figure ============================== 
-    plt.savefig(
-        os.path.join(folder_name,tag_name + '_{}_page_4.png'.format(station)))
+    figure_name = tag_name + '_{}_page_4.png'.format(station)
+
+    plt.savefig(os.path.join(folder_name,figure_name))
     plt.close()
-    print("Done")
+
+    if os.path.exists(os.path.join(folder_name,figure_name)):
+        print("Done")
+    else:
+        print("Failed to save figure")
 
     # ======================================================================== 
     #                                
@@ -2191,7 +2250,10 @@ def plot_waveform_comp(event, station, mode, folder_name, tag_name):
 
     store_info_xml(event,folder_name,tag_name,station)
 
-    print("Done\n")
+    if os.path.exists(os.path.join(folder_name,tag_name + '_{}_info.json'.format(station))):
+        print("Done\n")
+    else:
+        print("Failed to save json file")
 
 
 def cleanup_incomplete_plot_waveform_comp(station, folder_name, tag_name):
