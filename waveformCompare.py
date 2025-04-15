@@ -1560,6 +1560,11 @@ def plot_waveform_comp(event, station, mode, folder_name, tag_name):
         plt.figure(figsize=(18, 9))
         plt.subplot2grid((4, 9), (0, 4), colspan=5, rowspan=4)
 
+        plt.gca().spines.top.set_visible(False)
+        plt.gca().spines.bottom.set_visible(False)
+        plt.gca().spines.left.set_visible(False)
+        plt.gca().spines.right.set_visible(False)
+
         # conic map plot
         map = Basemap(projection='lcc', 
                         lat_0=mean_latitude, 
