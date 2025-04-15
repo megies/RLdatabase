@@ -1071,7 +1071,8 @@ def estimate_baz(rt, ac, start, end):
         corrsum_list.append(bazsum)
 
     # determine estimated backazimuth
-    if all(np.isnan(corrsum_list)):
+    # check if list of estimations is empty or if all values are either 0.0 or NaN
+    if not corrsum_list or not len([x for x in corrsum_list if x and not np.isnan(x)]):
         best_ebaz = np.nan
         max_ebaz_xcoef = np.nan
     else:
